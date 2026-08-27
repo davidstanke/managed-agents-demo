@@ -31,4 +31,4 @@
 * **Given** the application is currently rendered in Light or System mode
 * **When** the user activates the theme toggle and selects `dark`
 * **Then** the application visual theme switches to dark palette by setting the root `data-theme="dark"`
-* **And** the choice `dark` is persisted in client storage key `theme-preference`
+* **And** the choice `dark` is persisted in the client storage key `theme-preference`
