@@ -31,24 +31,24 @@ export const SuggestionsView: React.FC<SuggestionsViewProps> = ({
   return (
     <div className="space-y-4">
       {/* Suggestions Section Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-white/90 backdrop-blur-sm p-4 sm:p-5 rounded-3xl border border-amber-200/90 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white/90 dark:bg-slate-900/80 backdrop-blur-sm p-4 sm:p-5 rounded-3xl border border-amber-200/90 dark:border-slate-800 shadow-sm transition-colors">
         <div className="flex items-center gap-2.5">
           <div className="p-2.5 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-500 text-white shadow-sm shadow-orange-500/30">
             <Wand2 className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold text-slate-900">Tailored Name Matches</h2>
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-800">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Tailored Name Matches</h2>
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-orange-100 dark:bg-orange-950/60 text-orange-800 dark:text-orange-300 border border-orange-200/60 dark:border-orange-800/60">
                 Top {suggestions.length}
               </span>
               {activeCount > 0 && (
-                <span className="hidden sm:inline-block text-[11px] font-medium text-slate-500">
+                <span className="hidden sm:inline-block text-[11px] font-medium text-slate-500 dark:text-slate-400">
                   ({activeCount} {activeCount === 1 ? 'trait' : 'traits'} dialed in)
                 </span>
               )}
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               Ranked in real time based on your selected cat traits
             </p>
           </div>
