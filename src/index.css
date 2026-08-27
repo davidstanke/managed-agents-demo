@@ -6,6 +6,27 @@
   body {
     font-family: 'Plus Jakarta Sans', 'Outfit', system-ui, -apple-system, sans-serif;
   }
+
+  /* Smooth 150ms transitions for colors and backgrounds */
+  *,
+  *::before,
+  *::after {
+    transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 150ms;
+  }
+
+  /* Disable transitions and animations when prefers-reduced-motion is active */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 /* Custom scrollbar */
@@ -16,10 +37,19 @@
 ::-webkit-scrollbar-track {
   background: #fdf6ec;
 }
+.dark ::-webkit-scrollbar-track {
+  background: #1e293b;
+}
 ::-webkit-scrollbar-thumb {
   background: #cbd5e1;
   border-radius: 4px;
 }
+.dark ::-webkit-scrollbar-thumb {
+  background: #475569;
+}
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
 }

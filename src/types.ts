@@ -58,3 +58,7 @@ export interface ScoredCatName {
   matchedTraits: string[];
   rationale: string;
 }
+
+export type ThemePreference = 'light' | 'dark' | 'system';
+export type ResolvedTheme = 'light' | 'dark';
+
