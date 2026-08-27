@@ -45,7 +45,7 @@ You have access to the `spec-council-engine` skill. Follow the ordered 6-step li
   3. If changes were stashed, restore them (`git stash pop`).
 
 ### 3. Write Specification File to Disk
-- Write the initial specification file to `docs/specs/<feature_dir>/SPECIFICATION.md` using `write_to_file`. Ensure it includes the user choices gathered in Step 1.
+- Write the initial specification file to `docs/specs/<feature_name>.md` using `write_to_file`. Ensure it includes the user choices gathered in Step 1.
 
 ### 4. Invoke Reviewer Agents
 - Invoke the 3 council reviewer subagents concurrently (`model: flash`):
@@ -53,14 +53,14 @@ You have access to the `spec-council-engine` skill. Follow the ordered 6-step li
   - `tech-reviewer`: Evaluates technical feasibility, data contracts, and NFR clarity.
   - `security-reviewer`: Evaluates auth/RBAC policies, data protection hygiene, and security constraints.
 - In top-level workflows, reviewers are spawned directly by the orchestrator so they remain visible in the Antigravity Subagents side panel.
-- Reviewers inspect the specification file on disk (`docs/specs/<feature_dir>/SPECIFICATION.md`) and return structured in-memory assessments.
+- Reviewers inspect the specification file on disk (`docs/specs/<feature_name>.md`) and return structured in-memory assessments.
 
 ### 5. Revise Specification & Consult on Trade-Offs
 - Receive structured evaluation payloads directly from the reviewers (in-memory, no polling needed).
 - **Interactive Trade-Off Consultation (`ask_question`)**:
   - Whenever reviewers propose alternative approaches, architectural trade-offs, scope adjustments, or non-trivial recommendations, formulate multiple-choice options with `ask_question` to let the user decide the path forward.
   - If a reviewer flags a critical blocker (score < 50), consult the user interactively via `ask_question` before proceeding.
-- **Update Specification on Disk**: Revise `docs/specs/<feature_dir>/SPECIFICATION.md` (using `replace_file_content` or `write_to_file`) to incorporate resolved user choices, addressed feedback, and recommendations.
+- **Update Specification on Disk**: Revise `docs/specs/<feature_name>.md` (using `replace_file_content` or `write_to_file`) to incorporate resolved user choices, addressed feedback, and recommendations.
 - **Embed Scorecard & Decisions**: Ensure Section 2 ("Key Product Decisions & User Feedback") and Section 7 ("Review & Quality Scorecard") reflect all resolved decisions, reviewer scores, synthesis notes, and deferred items.
 
 ### 6. Finish & Deliver with Confirmation

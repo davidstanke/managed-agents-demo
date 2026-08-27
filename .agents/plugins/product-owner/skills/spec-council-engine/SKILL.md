@@ -36,16 +36,16 @@ This skill provides operational guidelines, quality rubrics, and BDD templates f
    - Restores stashed changes (`git stash pop`).
 
 3. **Step 3: Write Specification to Disk**:
-   - `spec-dra` writes the initial specification to `docs/specs/<feature_dir>/SPECIFICATION.md` using `write_to_file`.
+   - `spec-dra` writes the initial specification to `docs/specs/<feature_name>.md` using `write_to_file`.
 
 4. **Step 4: Invoke Reviewers (Direct Top-Level Invocation)**:
    - The parent orchestrator invokes `product-reviewer`, `tech-reviewer`, and `security-reviewer` in parallel as direct subagents via `invoke_subagent` (`model: flash`). This ensures all reviewer agents appear actively in Antigravity's **Subagents** panel.
-   - Reviewers inspect the specification file on disk (`docs/specs/<feature_dir>/SPECIFICATION.md`) and return structured assessments directly in their completion payloads (pure in-memory).
+   - Reviewers inspect the specification file on disk (`docs/specs/<feature_name>.md`) and return structured assessments directly in their completion payloads (pure in-memory).
 
 5. **Step 5: Revise Specification & Consult on Trade-Offs**:
    - `spec-dra` synthesizes feedback directly from the reviewers.
    - Proactively consults the user interactively via `ask_question` regarding any non-trivial architectural trade-offs, scope additions, or alternative solutions suggested by reviewers (as well as any critical blocker with score < 50).
-   - `spec-dra` updates the specification file on disk (`docs/specs/<feature_dir>/SPECIFICATION.md`) with addressed feedback and embeds Section 2 ("Key Product Decisions & User Feedback") and Section 7 ("Review & Quality Scorecard").
+   - `spec-dra` updates the specification file on disk (`docs/specs/<feature_name>.md`) with addressed feedback and embeds Section 2 ("Key Product Decisions & User Feedback") and Section 7 ("Review & Quality Scorecard").
 
 6. **Step 6: Finish & Deliver with Confirmation**:
    - `spec-dra` verifies the final specification file and presents the certified specification link, active branch name, and key user-aligned choices to the user.

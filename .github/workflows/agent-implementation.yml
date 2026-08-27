@@ -38,8 +38,8 @@ jobs:
         if: steps.find_spec.outputs.has_spec == 'true'
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: 'projects/YOUR_GCP_PROJECT_NUMBER/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
-          service_account: 'github-agent-runner@YOUR_GCP_PROJECT_ID.iam.gserviceaccount.com'
+          workload_identity_provider: 'projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          service_account: 'github-agent-runner@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com'
 
       - name: Set up Python
         if: steps.find_spec.outputs.has_spec == 'true'
@@ -56,7 +56,7 @@ jobs:
       - name: Run Antigravity Managed Agent
         if: steps.find_spec.outputs.has_spec == 'true'
         env:
-          GCP_PROJECT_ID: 'YOUR_GCP_PROJECT_ID'
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           GCP_LOCATION: 'us-central1'
           SPEC_FILE: ${{ steps.find_spec.outputs.spec_file }}
         run: |

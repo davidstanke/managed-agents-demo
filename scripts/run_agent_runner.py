@@ -15,8 +15,8 @@ def run_agent():
 
     client = genai.Client(vertexai=True, project=project_id, location=location)
 
-    # Read agent instructions from /.agents/eng-team/
-    agent_instructions_path = ".agents/eng-team/AGENTS.md"
+    # Read agent instructions from /.agents/agents/eng-team/
+    agent_instructions_path = ".agents/agents/eng-team/agent.md"
     agent_instructions = ""
     if os.path.exists(agent_instructions_path):
         with open(agent_instructions_path, "r") as f:
@@ -53,7 +53,7 @@ def run_agent():
             "sources": [
                 {
                     "type": "inline",
-                    "target": ".agents/eng-team/AGENTS.md",
+                    "target": ".agents/agents/eng-team/agent.md",
                     "content": agent_instructions,
                 },
                 {
