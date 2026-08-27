@@ -7,6 +7,23 @@ import google.auth
 import google.auth.transport.requests
 from google import genai
 
+def create_interaction_with_retry(client, prompt, max_retries=3):
+    """Creates an interaction with exponential backoff for transient network drops."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            return client.interactions.create(
+                agent="antigravity-preview-05-2026",
+                input=prompt,
+                environment="remote",
+                background=True,
+            )
+        except Exception as e:
+            if attempt == max_retries:
+                raise
+            wait_time = attempt * 10
+            print(f"⚠️ Connection error on create (attempt {attempt}/{max_retries}): {e}. Retrying in {wait_time}s...")
+            time.sleep(wait_time)
+
 def run_agent():
     project_id = os.environ.get("GCP_PROJECT_ID")
     location = os.environ.get("GCP_LOCATION", "global")
@@ -18,7 +35,13 @@ def run_agent():
 
     print(f"🚀 Invoking Antigravity Managed Agent for spec: {spec_file}")
 
-    client = genai.Client(vertexai=True, project=project_id, location=location)
+    # Configure client with extended timeout (5 minutes) for remote sandbox provisioning
+    client = genai.Client(
+        vertexai=True,
+        project=project_id,
+        location=location,
+        http_options={"timeout": 300000},
+    )
 
     # Read agent instructions from /.agents/agents/eng-team/
     agent_instructions_path = ".agents/agents/eng-team/agent.md"
@@ -53,21 +76,26 @@ def run_agent():
     3. Provide a detailed summary of changes.
     """
 
-    # Launch Managed Agent on Agent Runtime in the background
-    interaction = client.interactions.create(
-        agent="antigravity-preview-05-2026",
-        input=prompt,
-        environment="remote",
-        background=True,
-    )
+    # Launch Managed Agent on Agent Runtime in the background with retry logic
+    interaction = create_interaction_with_retry(client, prompt)
 
     print(f"⏳ Agent task started (Interaction ID: {interaction.id}, Environment ID: {interaction.environment_id}). Polling...")
 
-    # Poll for completion
+    # Poll for completion with transient error tolerance
+    consecutive_poll_errors = 0
+    max_poll_errors = 5
     while interaction.status in ("in_progress", "requires_action"):
         time.sleep(10)
-        interaction = client.interactions.get(id=interaction.id)
-        print(f"  Current status: {interaction.status}")
+        try:
+            interaction = client.interactions.get(id=interaction.id)
+            print(f"  Current status: {interaction.status}")
+            consecutive_poll_errors = 0
+        except Exception as e:
+            consecutive_poll_errors += 1
+            print(f"  ⚠️ Transient error during status poll ({consecutive_poll_errors}/{max_poll_errors}): {e}")
+            if consecutive_poll_errors >= max_poll_errors:
+                print("❌ Exceeded maximum consecutive poll errors. Exiting.")
+                raise
 
     if interaction.status == "completed":
         print("✅ Managed Agent execution completed.")
