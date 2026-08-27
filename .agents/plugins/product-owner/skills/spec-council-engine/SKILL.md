@@ -85,6 +85,8 @@ Every generated specification must follow this structure:
 * [ ] **BDD Acceptance Coverage:** Given/When/Then scenarios cover happy paths, error handling, and edge cases.
 * [ ] **Scope Boundaries:** In-scope and out-of-scope boundaries explicitly demarcated.
 * [ ] **Data & Contract Definitions:** Request/response schemas, state changes, and types explicitly documented.
+* [ ] **Storage & Threat Hygiene:** Strict value safelist validation and sandbox/incognito resilience documented for client state.
+* [ ] **Accessibility & ARIA Coverage:** Dynamic announcements and keyboard navigation requirements specified.
 
 ## 6. Review & Quality Scorecard
 ### Consensus Scorecard
