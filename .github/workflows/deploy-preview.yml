@@ -1,0 +1,210 @@
+name: Deploy PR Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.*'
+      - 'tailwind.config.*'
+      - 'postcss.config.*'
+      - 'tsconfig*.json'
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Pull Request number to deploy preview for'
+        required: true
+        type: string
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  deploy-preview:
+    name: Deploy Preview Revision
+    if: github.event_name == 'workflow_dispatch' || github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy Preview Revision to Cloud Run
+        id: deploy
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          SERVICE_NAME: ${{ vars.CAT_APP_SERVICE_NAME || 'purrfect-name' }}
+          REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'davidstanke-argolis-gemini-ent' }}
+        run: |
+          TAG="pr-${PR_NUMBER}"
+          echo "Deploying preview revision tag '$TAG' for service '$SERVICE_NAME'..."
+
+          # Deploy revision with --no-traffic and assign a unique tag for preview routing
+          gcloud run deploy "$SERVICE_NAME" \
+            --source . \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --no-traffic \
+            --tag "$TAG"
+
+          # Query the allocated tagged preview URL
+          PREVIEW_URL=$(gcloud run services describe "$SERVICE_NAME" \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --format="value(status.traffic.filter(tag=$TAG).url)")
+
+          if [ -z "$PREVIEW_URL" ]; then
+            # Deterministic fallback format for Cloud Run tagged revisions
+            PREVIEW_URL="https://${TAG}---${SERVICE_NAME}-357734569487.${REGION}.run.app"
+          fi
+
+          echo "Successfully deployed preview to: $PREVIEW_URL"
+          echo "preview_url=$PREVIEW_URL" >> "$GITHUB_OUTPUT"
+          echo "pr_tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Post or Update PR Preview Comment
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PREVIEW_URL: ${{ steps.deploy.outputs.preview_url }}
+          PR_TAG: ${{ steps.deploy.outputs.pr_tag }}
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { PR_NUMBER, PREVIEW_URL, PR_TAG, COMMIT_SHA } = process.env;
+            if (!PR_NUMBER) {
+              console.log('No PR number found, skipping comment.');
+              return;
+            }
+
+            const prNumber = parseInt(PR_NUMBER, 10);
+            const marker = '<!-- purrfect-name-pr-preview -->';
+            const shortSha = COMMIT_SHA ? COMMIT_SHA.substring(0, 7) : 'latest';
+            const deployedAt = new Date().toUTCString();
+
+            const body = `${marker}
+            ### 🐱 PurrfectName PR Preview Ready!
+
+            | Details | Link / Value |
+            |---|---|
+            | 🚀 **Preview URL** | [${PREVIEW_URL}](${PREVIEW_URL}) |
+            | 🏷️ **Revision Tag** | \`${PR_TAG}\` |
+            | 📦 **Commit** | \`${shortSha}\` |
+            | 🕒 **Deployed At** | ${deployedAt} |
+
+            > *Note: This revision receives 0% production traffic and is dedicated to this pull request.*
+            `;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const existingComment = comments.find(c => c.body.includes(marker));
+
+            if (existingComment) {
+              console.log(`Updating existing preview comment ${existingComment.id}...`);
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: body.trim(),
+              });
+            } else {
+              console.log(`Creating new preview comment on PR #${prNumber}...`);
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: body.trim(),
+              });
+            }
+
+  cleanup-preview:
+    name: Cleanup Preview Revision
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Remove PR Preview Tag from Cloud Run
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SERVICE_NAME: ${{ vars.CAT_APP_SERVICE_NAME || 'purrfect-name' }}
+          REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'davidstanke-argolis-gemini-ent' }}
+        run: |
+          TAG="pr-${PR_NUMBER}"
+          echo "Removing preview tag '$TAG' from service '$SERVICE_NAME'..."
+          gcloud run services update "$SERVICE_NAME" \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --remove-tags "$TAG" || true
+
+      - name: Update PR Preview Comment on Closure
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TAG: pr-${{ github.event.pull_request.number }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { PR_NUMBER, PR_TAG } = process.env;
+            const prNumber = parseInt(PR_NUMBER, 10);
+            const marker = '<!-- purrfect-name-pr-preview -->';
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const existingComment = comments.find(c => c.body.includes(marker));
+            if (existingComment) {
+              const closedBody = `${marker}
+            ### 🐱 PurrfectName PR Preview Decommissioned
+
+            > The preview revision tag \`${PR_TAG}\` has been retired following the closure of this pull request.
+            `;
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: closedBody.trim(),
+              });
+            }
