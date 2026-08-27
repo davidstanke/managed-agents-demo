@@ -120,16 +120,34 @@ async def branch_init_node(ctx: Context, node_input: Any) -> AsyncIterator[Event
     raw_input = _extract_text(node_input)
     clean_path_str = raw_input.strip().strip("`").strip("'").strip('"')
 
-    # Resolve spec directory path
-    spec_dir = Path(clean_path_str).resolve()
-    if spec_dir.is_file() and spec_dir.name == "spec.md":
-        spec_dir = spec_dir.parent
+    # Resolve spec directory path and file
+    input_path = Path(clean_path_str).resolve()
+    if input_path.is_file():
+        spec_file = input_path
+        if spec_file.name == "spec.md":
+            spec_dir = spec_file.parent
+            feature_name = spec_dir.name
+        else:
+            feature_name = spec_file.stem
+            spec_dir = spec_file.parent / feature_name
+            spec_dir.mkdir(parents=True, exist_ok=True)
+    elif input_path.is_dir():
+        if (input_path / "spec.md").exists():
+            spec_dir = input_path
+            spec_file = spec_dir / "spec.md"
+            feature_name = spec_dir.name
+        else:
+            md_files = [f for f in input_path.glob("*.md") if f.name != "README.md"]
+            if md_files:
+                spec_file = md_files[0]
+                feature_name = spec_file.stem
+                spec_dir = input_path / feature_name
+                spec_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                raise FileNotFoundError(f"Specification file not found in: {input_path}")
+    else:
+        raise FileNotFoundError(f"Specification path not found at: {clean_path_str}")
 
-    spec_file = spec_dir / "spec.md"
-    if not spec_file.exists():
-        raise FileNotFoundError(f"Specification file not found at: {spec_file}")
-
-    feature_name = spec_dir.name
     branch_name = f"feature/{feature_name}"
 
     yield Event(
