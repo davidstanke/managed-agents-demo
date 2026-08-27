@@ -31,8 +31,12 @@ def run_agent():
     with open(spec_file, "r") as f:
         spec_content = f.read()
 
+    github_repo = os.environ.get("GITHUB_REPOSITORY")
+    github_ref = os.environ.get("GITHUB_REF_NAME")
+    repo_info = f"\n    REPOSITORY: https://github.com/{github_repo} (branch: {github_ref})" if github_repo else ""
+
     prompt = f"""
-    You are executing as the `eng-team` agent.
+    You are executing as the `eng-team` agent.{repo_info}
 
     AGENTS.MD INSTRUCTIONS:
     {agent_instructions}
@@ -53,21 +57,7 @@ def run_agent():
     interaction = client.interactions.create(
         agent="antigravity-preview-05-2026",
         input=prompt,
-        environment={
-            "type": "remote",
-            "sources": [
-                {
-                    "type": "inline",
-                    "target": ".agents/agents/eng-team/agent.md",
-                    "content": agent_instructions,
-                },
-                {
-                    "type": "inline",
-                    "target": spec_file,
-                    "content": spec_content,
-                },
-            ],
-        },
+        environment="remote",
         background=True,
     )
 
