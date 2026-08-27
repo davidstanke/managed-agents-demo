@@ -173,13 +173,13 @@ jobs:
         if: steps.find_spec.outputs.has_spec == 'true'
         run: |
           python -m pip install --upgrade pip
-          pip install google-genai
+          pip install google-genai requests google-auth
 
       - name: Run Antigravity Managed Agent
         if: steps.find_spec.outputs.has_spec == 'true'
         env:
           GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-          GCP_LOCATION: 'us-central1'
+          GCP_LOCATION: 'global'
           SPEC_FILE: ${{ steps.find_spec.outputs.spec_file }}
         run: |
           python scripts/run_agent_runner.py
