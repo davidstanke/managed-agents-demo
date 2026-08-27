@@ -50,6 +50,26 @@ def parse_args():
         action="store_true",
         help="Fail if local server is not active instead of auto-launching.",
     )
+    parser.add_argument(
+        "--id-token",
+        default=os.environ.get("GCP_ID_TOKEN"),
+        help="Google Cloud ID Token for authenticated Cloud Run endpoints.",
+    )
+    parser.add_argument(
+        "--github-token",
+        default=os.environ.get("GITHUB_TOKEN"),
+        help="GitHub token for remote git repository push and PR creation.",
+    )
+    parser.add_argument(
+        "--repo-url",
+        default=os.environ.get("REPO_URL"),
+        help="Target Git repository clone URL (e.g. https://github.com/owner/repo.git).",
+    )
+    parser.add_argument(
+        "--branch",
+        default=os.environ.get("BRANCH"),
+        help="Target feature branch name.",
+    )
     return parser.parse_args()
 
 
@@ -123,22 +143,43 @@ async def ensure_server_url(url_override: Optional[str], host: str, no_auto_star
     raise TimeoutError(f"Server on port {port} failed to become healthy within 10 seconds. Check {log_file}")
 
 
-async def dispatch_task(server_url: str, spec_path: str):
+async def dispatch_task(
+    server_url: str,
+    spec_path: str,
+    id_token: Optional[str] = None,
+    github_token: Optional[str] = None,
+    repo_url: Optional[str] = None,
+    branch: Optional[str] = None,
+):
     resolved = Path(spec_path).resolve()
     if resolved.is_file() and resolved.name == "spec.md":
         resolved_str = str(resolved.parent)
-    else:
+    elif resolved.exists():
         resolved_str = str(resolved)
+    else:
+        resolved_str = spec_path
 
     print(f"\n==================================================")
     print(f" Dispatching Task to Implementer Service")
-    print(f" URL:  {server_url}")
-    print(f" Spec: {resolved_str}")
+    print(f" URL:    {server_url}")
+    print(f" Spec:   {resolved_str}")
+    if branch:
+        print(f" Branch: {branch}")
+    if repo_url:
+        print(f" Repo:   {repo_url}")
     print(f"==================================================\n")
 
-    endpoint = f"{server_url}/a2a/implementer_agent"
-    payload = {"spec_path": resolved_str}
+    endpoint = f"{server_url}/tasks"
+    payload = {
+        "spec_path": resolved_str,
+        "repo_url": repo_url,
+        "branch": branch,
+        "github_token": github_token,
+        "create_pr": bool(github_token),
+    }
     headers = {"Accept": "text/event-stream"}
+    if id_token:
+        headers["Authorization"] = f"Bearer {id_token}"
 
     # Execute request with SSE streaming (no timeout for long-running workflows)
     async with httpx.AsyncClient(timeout=None) as client:
@@ -166,7 +207,14 @@ async def main_async():
         host=args.host,
         no_auto_start=args.no_auto_start,
     )
-    await dispatch_task(server_url, args.spec_path)
+    await dispatch_task(
+        server_url=server_url,
+        spec_path=args.spec_path,
+        id_token=args.id_token,
+        github_token=args.github_token,
+        repo_url=args.repo_url,
+        branch=args.branch,
+    )
 
 
 def main():

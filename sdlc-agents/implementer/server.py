@@ -30,6 +30,11 @@ except (ImportError, ValueError):
 class TaskRequest(BaseModel):
     spec_path: str = Field(..., description="Path to spec directory or spec.md file")
     session_id: Optional[str] = Field(default=None, description="Optional session ID")
+    repo_url: Optional[str] = Field(default=None, description="Git clone URL (e.g. https://github.com/owner/repo.git)")
+    branch: Optional[str] = Field(default=None, description="Target feature branch name")
+    base_branch: Optional[str] = Field(default="main", description="Target base branch for Pull Request")
+    github_token: Optional[str] = Field(default=None, description="Ephemeral GitHub token for cloning, pushing, and PR creation")
+    create_pr: Optional[bool] = Field(default=True, description="Whether to automatically open a Pull Request upon completion")
 
 
 class A2AMessageRequest(BaseModel):
@@ -87,7 +92,7 @@ async def agent_card() -> Dict[str, Any]:
     }
 
 
-async def stream_task_events(spec_path: str) -> AsyncIterator[str]:
+async def stream_task_events(req: TaskRequest) -> AsyncIterator[str]:
     """Streams workflow execution events as plain text SSE data lines."""
     runner: InMemoryRunner = app.state.runner
     user_id = "a2a_caller"
@@ -98,7 +103,7 @@ async def stream_task_events(spec_path: str) -> AsyncIterator[str]:
 
     user_content = types.Content(
         role="user",
-        parts=[types.Part.from_text(text=spec_path)],
+        parts=[types.Part.from_text(text=req.model_dump_json())],
     )
 
     try:
@@ -133,7 +138,7 @@ async def execute_task(req: TaskRequest, request: Request):
 
         user_content = types.Content(
             role="user",
-            parts=[types.Part.from_text(text=req.spec_path)],
+            parts=[types.Part.from_text(text=req.model_dump_json())],
         )
 
         events_output = []
@@ -175,7 +180,7 @@ async def execute_task(req: TaskRequest, request: Request):
 
     # Default: Stream SSE in real time
     return StreamingResponse(
-        stream_task_events(req.spec_path),
+        stream_task_events(req),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

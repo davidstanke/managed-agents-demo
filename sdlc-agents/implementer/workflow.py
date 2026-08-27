@@ -1,9 +1,11 @@
 import asyncio
 from dataclasses import dataclass, field
+import json
 import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 from typing import Any, AsyncIterator, Dict, List, Optional
 from dotenv import load_dotenv
 
@@ -57,6 +59,20 @@ def _extract_text(node_input: Any) -> str:
         if "parts" in node_input:
             return "\n".join([str(p.get("text", "")) for p in node_input["parts"] if isinstance(p, dict) and p.get("text")])
     return str(node_input)
+
+
+def _parse_request_payload(node_input: Any) -> Dict[str, Any]:
+    """Parses JSON TaskRequest payload or falls back to plain spec path string."""
+    if isinstance(node_input, dict):
+        return node_input
+    raw = _extract_text(node_input).strip()
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {"spec_path": raw}
 
 
 def _extract_summary(text: str, default: str = "") -> str:
@@ -116,12 +132,73 @@ def _extract_runner_telemetry(text: str) -> tuple[bool, str, str]:
 
 
 async def branch_init_node(ctx: Context, node_input: Any) -> AsyncIterator[Event]:
-    """Initializes git branch for the feature spec."""
-    raw_input = _extract_text(node_input)
-    clean_path_str = raw_input.strip().strip("`").strip("'").strip('"')
+    """Initializes git workspace and branch for the feature spec."""
+    payload = _parse_request_payload(node_input)
+    raw_spec_path = payload.get("spec_path", "")
+    repo_url = payload.get("repo_url")
+    branch = payload.get("branch")
+    base_branch = payload.get("base_branch", "main")
+    github_token = payload.get("github_token")
+    create_pr = payload.get("create_pr", True)
+
+    clean_path_str = raw_spec_path.strip().strip("`").strip("'").strip('"')
+
+    workspace_dir = None
+
+    if repo_url and github_token:
+        # Remote Git execution mode (e.g. Cloud Run)
+        workspace_dir = Path(tempfile.mkdtemp(prefix="implementer_ws_"))
+        auth_url = repo_url
+        if repo_url.startswith("https://"):
+            auth_url = f"https://x-access-token:{github_token}@{repo_url[8:]}"
+
+        yield Event(
+            content=types.Content(
+                role="model",
+                parts=[types.Part.from_text(text=f"[Workspace] 📦 Preparing container workspace for `{repo_url}`...")]
+            )
+        )
+
+        target_branch = branch if branch else "main"
+
+        # Clone repository
+        print(f"[Workflow: branch_init] Cloning {repo_url} (branch: {target_branch}) into {workspace_dir}")
+        proc = await asyncio.create_subprocess_exec(
+            "git", "clone", "--depth", "10", "--branch", target_branch, auth_url, str(workspace_dir),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        _, clone_err = await proc.communicate()
+        if proc.returncode != 0:
+            print(f"[Workflow: branch_init] Branch clone fallback to default: {clone_err.decode()}")
+            proc2 = await asyncio.create_subprocess_exec(
+                "git", "clone", "--depth", "10", auth_url, str(workspace_dir),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            await proc2.communicate()
+            if branch:
+                await (await asyncio.create_subprocess_exec(
+                    "git", "checkout", "-B", branch, cwd=str(workspace_dir),
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                )).communicate()
+
+        # Configure git identity
+        await (await asyncio.create_subprocess_exec("git", "config", "user.name", "Implementer Agent (Cloud Run)", cwd=str(workspace_dir))).communicate()
+        await (await asyncio.create_subprocess_exec("git", "config", "user.email", "implementer-agent@cloudrun.local", cwd=str(workspace_dir))).communicate()
+
+        try:
+            os.chdir(workspace_dir)
+        except Exception as e:
+            print(f"[Workflow: branch_init] os.chdir error: {e}")
+
+        input_path = (workspace_dir / clean_path_str).resolve()
+    else:
+        # Local execution mode
+        workspace_dir = repo_root
+        input_path = Path(clean_path_str).resolve()
+        if not input_path.is_absolute() or not input_path.exists():
+            input_path = (repo_root / clean_path_str).resolve()
 
     # Resolve spec directory path and file
-    input_path = Path(clean_path_str).resolve()
     if input_path.is_file():
         spec_file = input_path
         if spec_file.name == "spec.md":
@@ -148,7 +225,7 @@ async def branch_init_node(ctx: Context, node_input: Any) -> AsyncIterator[Event
     else:
         raise FileNotFoundError(f"Specification path not found at: {clean_path_str}")
 
-    branch_name = f"feature/{feature_name}"
+    branch_name = branch or f"feature/{feature_name}"
 
     yield Event(
         content=types.Content(
@@ -157,27 +234,34 @@ async def branch_init_node(ctx: Context, node_input: Any) -> AsyncIterator[Event
         )
     )
 
-    # Checkout or create branch
-    print(f"[Workflow: branch_init] Checking out branch {branch_name}")
-    proc = await asyncio.create_subprocess_exec(
-        "git", "checkout", "-B", branch_name,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        print(f"[Workflow: branch_init] Git checkout warning: {stderr.decode()}")
+    if not repo_url or not github_token:
+        # Checkout or create branch locally
+        print(f"[Workflow: branch_init] Checking out branch {branch_name}")
+        proc = await asyncio.create_subprocess_exec(
+            "git", "checkout", "-B", branch_name,
+            cwd=str(workspace_dir),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            print(f"[Workflow: branch_init] Git checkout warning: {stderr.decode()}")
 
     output_data = {
+        "workspace_dir": str(workspace_dir),
         "spec_dir": str(spec_dir),
         "spec_file": str(spec_file),
         "feature_name": feature_name,
         "branch_name": branch_name,
+        "base_branch": base_branch,
+        "repo_url": repo_url,
+        "github_token": github_token,
+        "create_pr": create_pr,
     }
     yield Event(
         output=output_data,
         content=types.Content(
             role="model",
-            parts=[types.Part.from_text(text=f"[Branch] 🌿 Created and checked out feature branch `{branch_name}` successfully.")]
+            parts=[types.Part.from_text(text=f"[Branch] 🌿 Ready on feature branch `{branch_name}`.")]
         ),
         state={"spec_info": output_data}
     )
@@ -533,6 +617,31 @@ async def task_orchestrator_node(ctx: Context, node_input: Dict[str, Any]) -> As
             )
             break
         else:
+            # Commit passing task changes to git
+            workspace_dir = node_input.get("workspace_dir")
+            feature_name = node_input.get("feature_name", "feature")
+            if workspace_dir:
+                try:
+                    proc_st = await asyncio.create_subprocess_exec(
+                        "git", "status", "--porcelain",
+                        cwd=str(workspace_dir),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    )
+                    st_out, _ = await proc_st.communicate()
+                    if st_out.strip():
+                        await (await asyncio.create_subprocess_exec("git", "add", "-A", cwd=str(workspace_dir))).communicate()
+                        commit_msg = f"feat({feature_name}): complete task {idx} - {task_name}"
+                        await (await asyncio.create_subprocess_exec("git", "commit", "-m", commit_msg, cwd=str(workspace_dir))).communicate()
+                        yield Event(
+                            content=types.Content(
+                                role="model",
+                                parts=[types.Part.from_text(text=f"[Git] 💾 Committed changes for task {idx} ({task_name})")]
+                            )
+                        )
+                except Exception as e:
+                    print(f"[Workflow: task_orchestrator] Git commit warning: {e}")
+
             yield Event(
                 content=types.Content(
                     role="model",
@@ -559,8 +668,13 @@ async def task_orchestrator_node(ctx: Context, node_input: Dict[str, Any]) -> As
 async def pr_node(ctx: Context, node_input: Dict[str, Any]) -> AsyncIterator[Event]:
     """Final node: reports execution outcome and creates GitHub PR if successful."""
     status = node_input.get("status")
-    feature_name = node_input.get("feature_name")
-    branch_name = node_input.get("branch_name")
+    feature_name = node_input.get("feature_name", "feature")
+    branch_name = node_input.get("branch_name", "feature")
+    base_branch = node_input.get("base_branch", "main")
+    workspace_dir = node_input.get("workspace_dir")
+    repo_url = node_input.get("repo_url")
+    github_token = node_input.get("github_token")
+    create_pr = node_input.get("create_pr", True)
     results = node_input.get("results", [])
 
     summary_lines = [
@@ -579,9 +693,95 @@ async def pr_node(ctx: Context, node_input: Dict[str, Any]) -> AsyncIterator[Eve
     summary_text = "\n".join(summary_lines)
 
     if status == "completed":
-        summary_text += f"\n\nAll tasks verified. Ready to create Pull Request for branch `{branch_name}`."
+        summary_text += f"\n\nAll tasks verified successfully for branch `{branch_name}`."
+
+        if repo_url and github_token and workspace_dir:
+            yield Event(
+                content=types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(text=f"[Git] 🚀 Pushing `{branch_name}` to remote repository...")]
+                )
+            )
+            try:
+                proc_push = await asyncio.create_subprocess_exec(
+                    "git", "push", "origin", branch_name,
+                    cwd=str(workspace_dir),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                _, push_err = await proc_push.communicate()
+                if proc_push.returncode != 0:
+                    yield Event(
+                        content=types.Content(
+                            role="model",
+                            parts=[types.Part.from_text(text=f"[Git] ⚠️ Warning pushing branch: {push_err.decode()}")]
+                        )
+                    )
+                else:
+                    yield Event(
+                        content=types.Content(
+                            role="model",
+                            parts=[types.Part.from_text(text=f"[Git] 🌿 Branch `{branch_name}` successfully pushed to GitHub.")]
+                        )
+                    )
+
+                if create_pr:
+                    yield Event(
+                        content=types.Content(
+                            role="model",
+                            parts=[types.Part.from_text(text=f"[PR] 📬 Opening Pull Request (`{branch_name}` -> `{base_branch}`)...")]
+                        )
+                    )
+                    env = os.environ.copy()
+                    env["GITHUB_TOKEN"] = github_token
+                    pr_title = f"feat: implement {feature_name}"
+                    pr_body = summary_text
+
+                    proc_pr = await asyncio.create_subprocess_exec(
+                        "gh", "pr", "create",
+                        "--base", base_branch,
+                        "--head", branch_name,
+                        "--title", pr_title,
+                        "--body", pr_body,
+                        cwd=str(workspace_dir),
+                        env=env,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    )
+                    pr_out, pr_err = await proc_pr.communicate()
+                    pr_url = pr_out.decode().strip()
+                    if proc_pr.returncode == 0 and pr_url.startswith("http"):
+                        summary_text += f"\n\n**Pull Request**: [{pr_url}]({pr_url})"
+                        yield Event(
+                            content=types.Content(
+                                role="model",
+                                parts=[types.Part.from_text(text=f"[PR] 🎉 Pull Request created: {pr_url}")]
+                            )
+                        )
+                    else:
+                        proc_view = await asyncio.create_subprocess_exec(
+                            "gh", "pr", "view", branch_name, "--json", "url", "-q", ".url",
+                            cwd=str(workspace_dir), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                        )
+                        pv_out, _ = await proc_view.communicate()
+                        existing_pr = pv_out.decode().strip()
+                        if existing_pr.startswith("http"):
+                            summary_text += f"\n\n**Pull Request (Existing)**: [{existing_pr}]({existing_pr})"
+                            yield Event(
+                                content=types.Content(
+                                    role="model",
+                                    parts=[types.Part.from_text(text=f"[PR] 🔄 Pull Request updated: {existing_pr}")]
+                                )
+                            )
+                        else:
+                            err_msg = pr_err.decode().strip()
+                            if err_msg:
+                                summary_text += f"\n\n*PR Note*: {err_msg}"
+            except Exception as e:
+                print(f"[Workflow: pr_node] Git/PR error: {e}")
+                summary_text += f"\n\n*Git Push / PR Error*: {e}"
     else:
-        summary_text += "\n\nBlocker encountered during task execution. Manual intervention required."
+        summary_text += "\n\n🛑 Blocker encountered during task execution. Pull Request not created."
 
     print(f"\n{summary_text}\n")
     yield Event(

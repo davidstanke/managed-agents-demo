@@ -1,0 +1,98 @@
+name: Implement Feature Spec
+
+on:
+  push:
+    paths:
+      - 'docs/specs/**.md'
+      - '!docs/specs/_implemented/**'
+  workflow_dispatch:
+    inputs:
+      spec_path:
+        description: 'Path to spec markdown file (e.g. docs/specs/feature-001.md)'
+        required: true
+        type: string
+      branch:
+        description: 'Target feature branch name (defaults to current ref branch)'
+        required: false
+        type: string
+      create_pr:
+        description: 'Create Pull Request targeting main upon completion'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  implement:
+    name: Run Implementer Agent
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Resolve Specification Path & Branch
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SPEC="${{ inputs.spec_path }}"
+            BRANCH="${{ inputs.branch }}"
+            CREATE_PR="${{ inputs.create_pr }}"
+            if [ -z "$BRANCH" ]; then
+              BRANCH="${{ github.ref_name }}"
+            fi
+          else
+            # Detect changed spec file in push
+            CHANGED_SPECS=$(git diff --name-only HEAD~1 HEAD -- 'docs/specs/*.md' ':(exclude)docs/specs/_implemented/**' || true)
+            if [ -z "$CHANGED_SPECS" ]; then
+              # Fallback: check all docs/specs
+              CHANGED_SPECS=$(find docs/specs -maxdepth 1 -name "*.md" | head -n 1)
+            fi
+            SPEC=$(echo "$CHANGED_SPECS" | head -n 1)
+            BRANCH="${{ github.ref_name }}"
+            CREATE_PR="true"
+          fi
+
+          if [ -z "$SPEC" ] || [ ! -f "$SPEC" ]; then
+            echo "::warning::No valid spec file found to implement. Skipping execution."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Found target spec: $SPEC on branch: $BRANCH"
+          echo "spec_path=$SPEC" >> "$GITHUB_OUTPUT"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "create_pr=$CREATE_PR" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        if: steps.resolve.outputs.skip != 'true'
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+          token_format: 'id_token'
+          id_token_audience: ${{ vars.IMPLEMENTER_SERVICE_URL }}
+          id_token_include_email: true
+
+      - name: Invoke Implementer Agent on Cloud Run
+        if: steps.resolve.outputs.skip != 'true'
+        env:
+          IMPLEMENTER_SERVICE_URL: ${{ vars.IMPLEMENTER_SERVICE_URL }}
+          GCP_ID_TOKEN: ${{ steps.auth.outputs.id_token }}
+          SPEC_PATH: ${{ steps.resolve.outputs.spec_path }}
+          BRANCH: ${{ steps.resolve.outputs.branch }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CREATE_PR: ${{ steps.resolve.outputs.create_pr }}
+        run: |
+          python3 .github/scripts/invoke_cloud_run.py

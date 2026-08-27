@@ -105,12 +105,32 @@ sdlc-agents/.venv/bin/python sdlc-agents/implementer/client.py specs/<feature>
 
 ---
 
-## Remote / Deployed Execution (Cloud Run & Agent Runtime)
+## Remote / Deployed Execution (Cloud Run & GitHub Actions)
 
-When the implementer agent is deployed to Cloud Run or Vertex AI Agent Runtime, pass the target URL or set `IMPLEMENTER_AGENT_URL`:
+### 1. Deploying to Cloud Run
+To deploy the implementer service to Google Cloud Run:
 
 ```bash
-sdlc-agents/.venv/bin/python sdlc-agents/implementer/client.py specs/<feature> --url https://<deployed-service-url>
+PROJECT_ID="<your-gcp-project>" REGION="us-central1" ./scripts/deploy_cloud_run.sh
+```
+
+### 2. GitHub Actions Automation
+A GitHub Actions workflow ([`.github/workflows/implement-spec.yml`](file:///.github/workflows/implement-spec.yml)) automatically triggers whenever a spec markdown file under `docs/specs/*.md` is pushed to a feature branch (excluding `docs/specs/_implemented/**`).
+
+Ensure the following repository variables are configured in GitHub (`Settings > Secrets and variables > Actions > Variables`):
+- `IMPLEMENTER_SERVICE_URL`: Deployed Cloud Run Service URL (e.g. `https://sdlc-implementer-agent-...a.run.app`)
+- `WIF_PROVIDER`: Workload Identity Federation provider resource name
+- `WIF_SERVICE_ACCOUNT`: Service account email bound to WIF with invoker permissions
+- `GCP_PROJECT_ID`: Google Cloud Project ID
+- `GCP_REGION`: Google Cloud Region (e.g. `us-central1`)
+
+### 3. Remote Invocation via Client CLI
+When invoking a deployed Cloud Run instance directly from a developer workstation:
+
+```bash
+sdlc-agents/.venv/bin/python sdlc-agents/implementer/client.py specs/<feature> \
+  --url https://<deployed-service-url> \
+  --id-token "$(gcloud auth print-identity-token --audiences=https://<deployed-service-url>)"
 ```
 
 ---
