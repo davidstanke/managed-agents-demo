@@ -72,7 +72,7 @@ gcloud run deploy "${SERVICE_NAME}" \
   --max-instances="${MAX_INSTANCES}" \
   --concurrency="${CONCURRENCY}" \
   --execution-environment=gen2 \
-  --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_GENAI_LOCATION=${REGION},GOOGLE_GENAI_MODEL=gemini-3.7-flash" \
+  --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_GENAI_LOCATION=global,GOOGLE_GENAI_MODEL=gemini-3.7-flash" \
   --no-allow-unauthenticated
 
 SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(status.url)')"

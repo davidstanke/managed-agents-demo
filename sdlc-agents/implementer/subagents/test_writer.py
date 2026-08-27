@@ -9,7 +9,7 @@ def get_test_writer_config() -> LocalAgentConfig:
         or bool(os.environ.get("GOOGLE_CLOUD_PROJECT"))
     )
     project = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT_ID")
-    location = os.environ.get("GOOGLE_GENAI_LOCATION", "global")
+    location = "global"
     model_name = os.environ.get("GOOGLE_GENAI_MODEL", "gemini-3.7-flash")
     api_key = os.environ.get("GEMINI_API_KEY")
 
