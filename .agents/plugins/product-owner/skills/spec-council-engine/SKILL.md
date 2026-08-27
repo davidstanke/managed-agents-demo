@@ -9,27 +9,47 @@ This skill provides operational guidelines, quality rubrics, and BDD templates f
 
 ---
 
-## 🏗️ The 2-Phase Lifecycle
+## 🏗️ The 6-Step Spec Lifecycle
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                   2-Phase Spec Authoring & Review Engine               │
-├───────────────────────────────────┬────────────────────────────────────┤
-│ 1. Spec Drafting (DRA)            │ 2. Parallel Review & Synthesis     │
-│    (spec-dra)                     │    (Prod, Tech, Sec -> spec-dra)   │
-└───────────────────────────────────┴────────────────────────────────────┘
+│                   6-Step Spec Authoring & Review Flow                  │
+├────────────────────────────────────────────────────────────────────────┤
+│ 1. Proactive Discovery (DRA interviews user on key choices via Q&A)   │
+│ 2. Feature Branch Checkout (`feature/<feature-slug>`)                  │
+│ 3. Write Specification File to Disk (`docs/specs/...`)                 │
+│ 4. Invoke Reviewers (`product`, `tech`, `security` reviewers)          │
+│ 5. Revise Specification (DRA consults user on trade-offs & updates)    │
+│ 6. Finish & Deliver with Confirmation (Summarize choices & get verify) │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-1. **Phase 1: Spec Authoring (`spec-dra`)**:
-   - Clarifies ambiguous requirements early with the user using `ask_question`.
-   - Defines clear user personas, business value, user workflows, BDD acceptance criteria, and data contracts.
+1. **Step 1: Proactive Discovery & Clarification (`spec-dra`)**:
+   - Always conducts an initial discovery probing interview via `ask_question` (2–4 targeted questions on UX workflows, edge-case handling, scope boundaries, and persistence/storage trade-offs).
+   - Records resolved user preferences and choices to seed Section 2 ("Key Product Decisions & User Feedback").
+   - Analyzes user personas, business value, user workflows, BDD acceptance criteria, and data contracts.
    - Focuses strictly on product requirements and behavior without code implementation details.
 
-2. **Phase 2: Parallel Review & Direct Synthesis**:
-   - **Direct Top-Level Invocation & Visibility**: The parent orchestrator invokes `product-reviewer`, `tech-reviewer`, and `security-reviewer` in parallel as direct subagents via `invoke_subagent` (`model: flash`). This ensures all reviewer agents appear actively in Antigravity's **Subagents** panel.
-   - **In-Memory Payloads**: Reviewers return structured assessments directly in their completion payloads (pure in-memory, no intermediate file writes).
-   - **Direct Synthesis & Blocker Resolution**: The review scores and feedback are synthesized directly into the specification. If any reviewer identifies an irreconcilable critical blocker (<50), consult the user interactively via `ask_question`.
-   - **Final Delivery**: Write the certified specification with embedded review scorecard directly to `docs/specs/<feature_dir>/SPECIFICATION.md`.
+2. **Step 2: Feature Branch Checkout**:
+   - `spec-dra` stashes any uncommitted modifications (`git stash`).
+   - Checks out a new Git branch named `feature/<feature-slug>` matching the feature (`git checkout -b feature/<feature-slug>` or `git checkout feature/<feature-slug>`).
+   - Restores stashed changes (`git stash pop`).
+
+3. **Step 3: Write Specification to Disk**:
+   - `spec-dra` writes the initial specification to `docs/specs/<feature_dir>/SPECIFICATION.md` using `write_to_file`.
+
+4. **Step 4: Invoke Reviewers (Direct Top-Level Invocation)**:
+   - The parent orchestrator invokes `product-reviewer`, `tech-reviewer`, and `security-reviewer` in parallel as direct subagents via `invoke_subagent` (`model: flash`). This ensures all reviewer agents appear actively in Antigravity's **Subagents** panel.
+   - Reviewers inspect the specification file on disk (`docs/specs/<feature_dir>/SPECIFICATION.md`) and return structured assessments directly in their completion payloads (pure in-memory).
+
+5. **Step 5: Revise Specification & Consult on Trade-Offs**:
+   - `spec-dra` synthesizes feedback directly from the reviewers.
+   - Proactively consults the user interactively via `ask_question` regarding any non-trivial architectural trade-offs, scope additions, or alternative solutions suggested by reviewers (as well as any critical blocker with score < 50).
+   - `spec-dra` updates the specification file on disk (`docs/specs/<feature_dir>/SPECIFICATION.md`) with addressed feedback and embeds Section 2 ("Key Product Decisions & User Feedback") and Section 7 ("Review & Quality Scorecard").
+
+6. **Step 6: Finish & Deliver with Confirmation**:
+   - `spec-dra` verifies the final specification file and presents the certified specification link, active branch name, and key user-aligned choices to the user.
+   - Explicitly invites user confirmation and feedback on any potential refinements before implementation begins.
 
 ---
 
@@ -62,10 +82,14 @@ Every generated specification must follow this structure:
 **I want to** [Action / Feature / Goal],
 **So that** [Benefit / Value / Reason].
 
-## 2. Business Context & User Workflow
+## 2. Key Product Decisions & User Feedback
+* **Decision 1:** [Clarified user choice, UX preference, or scope boundary resolved via Q&A]
+* **Decision 2:** [Architectural or trade-off resolution aligned with user]
+
+## 3. Business Context & User Workflow
 [Concise explanation of business context, user workflows, and target personas]
 
-## 3. Behavior-Driven Development (BDD) Acceptance Criteria
+## 4. Behavior-Driven Development (BDD) Acceptance Criteria
 * **AC1: [Scenario Title - Happy Path]**
   * **Given** [explicit initial state, authenticated user, or preconditions]
   * **When** [action, event trigger, or user interaction]
@@ -75,20 +99,21 @@ Every generated specification must follow this structure:
   * **When** [action or trigger occurs]
   * **Then** [expected error response, message, or fallback behavior]
 
-## 4. Constraints, Boundaries & Out of Scope
+## 5. Constraints, Boundaries & Out of Scope
 * **Non-Functional Requirements (NFRs):** [Performance metrics, latency targets, security/auth policies, rate limits]
 * **In-Scope:** [Explicit list of capabilities and behaviors to deliver]
 * **Out of Scope:** [Explicit non-goals to prevent scope creep]
 
-## 5. Specification Quality Checklist
+## 6. Specification Quality Checklist
 * [ ] **Requirements Clarity:** User persona, business intent, and value proposition clearly stated.
+* [ ] **User Feedback Alignment:** Key product decisions and user feedback explicitly recorded in Section 2.
 * [ ] **BDD Acceptance Coverage:** Given/When/Then scenarios cover happy paths, error handling, and edge cases.
 * [ ] **Scope Boundaries:** In-scope and out-of-scope boundaries explicitly demarcated.
 * [ ] **Data & Contract Definitions:** Request/response schemas, state changes, and types explicitly documented.
 * [ ] **Storage & Threat Hygiene:** Strict value safelist validation and sandbox/incognito resilience documented for client state.
 * [ ] **Accessibility & ARIA Coverage:** Dynamic announcements and keyboard navigation requirements specified.
 
-## 6. Review & Quality Scorecard
+## 7. Review & Quality Scorecard
 ### Consensus Scorecard
 | Reviewer Role | Score (1-100) | Status | Key Focus Area |
 | :--- | :--- | :--- | :--- |
@@ -109,4 +134,5 @@ Every generated specification must follow this structure:
 ## 📚 Reference Subdocuments & Tooling
 
 * **[BDD & Schema Templates](references/bdd_templates.md)**: Detailed BDD Given/When/Then syntax, REST/GraphQL contracts, and state transition matrices.
+
 
