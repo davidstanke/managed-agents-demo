@@ -26,10 +26,10 @@ This skill provides operational guidelines, quality rubrics, and BDD templates f
    - Focuses strictly on product requirements and behavior without code implementation details.
 
 2. **Phase 2: Parallel Review & Direct Synthesis**:
-   - **Parallel Fast Review**: `spec-dra` invokes `product-reviewer`, `tech-reviewer`, and `security-reviewer` concurrently via `model: flash`.
+   - **Direct Top-Level Invocation & Visibility**: The parent orchestrator invokes `product-reviewer`, `tech-reviewer`, and `security-reviewer` in parallel as direct subagents via `invoke_subagent` (`model: flash`). This ensures all reviewer agents appear actively in Antigravity's **Subagents** panel.
    - **In-Memory Payloads**: Reviewers return structured assessments directly in their completion payloads (pure in-memory, no intermediate file writes).
-   - **Direct Synthesis & Blocker Resolution**: `spec-dra` synthesizes reviewer scores and feedback directly into the specification. If any reviewer identifies an irreconcilable critical blocker (<50), `spec-dra` consults the user interactively via `ask_question`.
-   - **Final Delivery**: `spec-dra` writes the certified specification with embedded review scorecard directly to `docs/specs/<feature_dir>/SPECIFICATION.md`.
+   - **Direct Synthesis & Blocker Resolution**: The review scores and feedback are synthesized directly into the specification. If any reviewer identifies an irreconcilable critical blocker (<50), consult the user interactively via `ask_question`.
+   - **Final Delivery**: Write the certified specification with embedded review scorecard directly to `docs/specs/<feature_dir>/SPECIFICATION.md`.
 
 ---
 

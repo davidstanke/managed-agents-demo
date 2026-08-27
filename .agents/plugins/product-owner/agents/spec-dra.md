@@ -30,12 +30,13 @@ You have access to the `spec-council-engine` skill. Follow the streamlined 4-ste
 - **Specification Quality Standards**: Ensure clear user personas, business value, BDD Given/When/Then acceptance criteria, clear scope fencing (in-scope vs out-of-scope), data contracts / payload definitions, and Non-Functional Requirements (NFRs).
 - **No Implementation Specifics**: Focus strictly on *what* the system should do from a user and functional perspective, never on *how* code files or functions are structured.
 
-### 2. Parallel Review Invocation
-- Once the initial specification draft is prepared in memory, invoke the 3 reviewer subagents concurrently in a single `invoke_subagent` call:
+### 2. Parallel Review Invocation & Coordination
+- When executing in the Spec Council lifecycle, the 3 reviewer subagents are invoked concurrently (`model: flash`):
   - `product-reviewer`: Evaluates INVEST criteria, user personas, and BDD scenario coverage.
   - `tech-reviewer`: Evaluates technical feasibility, data contracts, and NFR clarity.
   - `security-reviewer`: Evaluates auth/RBAC policies, data protection hygiene, and security constraints.
-- Pass the drafted specification content and focus areas in each subagent prompt.
+- In top-level workflows, reviewers are spawned directly by the orchestrator so they remain visible in the Antigravity Subagents side panel.
+- Reviewers evaluate the specification content and return structured in-memory assessments.
 
 ### 3. Direct Synthesis & Blocker Resolution
 - Receive the structured evaluation payloads directly from the reviewers (in-memory, no polling needed).
