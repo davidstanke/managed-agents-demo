@@ -350,10 +350,10 @@ async def council_analysis_node(ctx: Context, node_input: Any) -> AsyncIterator[
             parts=[types.Part.from_text(text="[Council: Clean Code] 🧹 Reviewing naming, clarity, simplicity, dead code, and DRY...")]
         )
     )
-    clean_code_agent = create_clean_code_agent()
     clean_code_prompt = f"Please evaluate the following PR code changes for Clean Code & Readability:\n\n{diff_context}"
-    clean_code_res = await clean_code_agent.run_async(clean_code_prompt)
-    clean_code_text = clean_code_res.text if hasattr(clean_code_res, "text") else str(clean_code_res)
+    async with create_clean_code_agent() as clean_code_agent:
+        clean_code_res = await clean_code_agent.chat(clean_code_prompt)
+        clean_code_text = await clean_code_res.text() if hasattr(clean_code_res, "text") and callable(clean_code_res.text) else (clean_code_res.text if hasattr(clean_code_res, "text") else str(clean_code_res))
 
     yield Event(
         content=types.Content(
@@ -369,10 +369,10 @@ async def council_analysis_node(ctx: Context, node_input: Any) -> AsyncIterator[
             parts=[types.Part.from_text(text="[Council: Maintainability] 🏗️ Reviewing architecture, modularity, type safety, and testability...")]
         )
     )
-    maintainability_agent = create_maintainability_agent()
     maintainability_prompt = f"Please evaluate the following PR code changes for Maintainability & Architecture:\n\n{diff_context}"
-    maintainability_res = await maintainability_agent.run_async(maintainability_prompt)
-    maintainability_text = maintainability_res.text if hasattr(maintainability_res, "text") else str(maintainability_res)
+    async with create_maintainability_agent() as maintainability_agent:
+        maintainability_res = await maintainability_agent.chat(maintainability_prompt)
+        maintainability_text = await maintainability_res.text() if hasattr(maintainability_res, "text") and callable(maintainability_res.text) else (maintainability_res.text if hasattr(maintainability_res, "text") else str(maintainability_res))
 
     yield Event(
         content=types.Content(
@@ -388,10 +388,10 @@ async def council_analysis_node(ctx: Context, node_input: Any) -> AsyncIterator[
             parts=[types.Part.from_text(text="[Council: Defect Inspector] 🐞 Inspecting for edge cases, null hazards, and error handling...")]
         )
     )
-    defect_agent = create_defect_inspector_agent()
     defect_prompt = f"Please evaluate the following PR code changes for Defects, Edge Cases, and Runtime Safety:\n\n{diff_context}"
-    defect_res = await defect_agent.run_async(defect_prompt)
-    defect_text = defect_res.text if hasattr(defect_res, "text") else str(defect_res)
+    async with create_defect_inspector_agent() as defect_agent:
+        defect_res = await defect_agent.chat(defect_prompt)
+        defect_text = await defect_res.text() if hasattr(defect_res, "text") and callable(defect_res.text) else (defect_res.text if hasattr(defect_res, "text") else str(defect_res))
 
     yield Event(
         content=types.Content(
@@ -422,7 +422,6 @@ async def synthesis_node(ctx: Context, node_input: Any) -> AsyncIterator[Event]:
         )
     )
 
-    synthesizer_agent = create_synthesizer_agent()
     synth_prompt = (
         f"Pull Request Title: {pr_data.get('pr_title', 'N/A')}\n"
         f"PR Number: #{pr_data.get('pr_number', 'N/A')}\n"
@@ -433,15 +432,16 @@ async def synthesis_node(ctx: Context, node_input: Any) -> AsyncIterator[Event]:
         f"Synthesize the findings into a consolidated GitHub PR Review Report and inline comments."
     )
 
-    synth_res = await synthesizer_agent.run_async(synth_prompt)
-    synth_text = synth_res.text if hasattr(synth_res, "text") else str(synth_res)
+    async with create_synthesizer_agent() as synthesizer_agent:
+        synth_res = await synthesizer_agent.chat(synth_prompt)
+        synth_text = await synth_res.text() if hasattr(synth_res, "text") and callable(synth_res.text) else (synth_res.text if hasattr(synth_res, "text") else str(synth_res))
 
     # Parse JSON payload from synthesizer output
     parsed_payload = {}
     json_match = re.search(r"```(?:json_review_payload|json)?\s*(\{.*?\})\s*```", synth_text, re.DOTALL)
     if json_match:
         try:
-            parsed_payload = json.loads(json_match.group(1))
+            parsed_payload = json.loads(json_match.group(1), strict=False)
         except Exception as e:
             print(f"[Workflow: synthesis] JSON parse error: {e}")
 
