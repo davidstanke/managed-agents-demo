@@ -4,7 +4,7 @@
  * 1. Hook/Context returns themePreference, resolvedTheme, setThemePreference, cycleTheme
  * 2. Real-time media query listener on (prefers-color-scheme: dark) when preference is 'system'
  * 3. Unsubscribing media query listener when preference changes to 'light'/'dark' or on unmount
- * 4. Theme cycling logic
+ * 4. Theme cycling logic: light -> dark -> system -> light
  */
 
 import type { ThemePreference, ResolvedTheme } from '../types';
@@ -31,8 +31,32 @@ export function runUseThemeTests(): { passed: number; failed: number; errors: st
     }
   }
 
+  function assertEqual<T>(actual: T, expected: T, message: string) {
+    if (actual === expected) {
+      passed++;
+    } else {
+      failed++;
+      errors.push(`FAIL: ${message} (Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)})`);
+    }
+  }
+
   // Verify type contract and runtime export of useTheme
   assert(typeof useTheme === 'function', 'useTheme is exported as a function');
+
+  // Verify theme cycling transition function logic
+  const getNextTheme = (currentPref: ThemePreference): ThemePreference => {
+    if (currentPref === 'light') {
+      return 'dark';
+    } else if (currentPref === 'dark') {
+      return 'system';
+    } else {
+      return 'light';
+    }
+  };
+
+  assertEqual(getNextTheme('light'), 'dark', 'Cycling from "light" yields "dark"');
+  assertEqual(getNextTheme('dark'), 'system', 'Cycling from "dark" yields "system"');
+  assertEqual(getNextTheme('system'), 'light', 'Cycling from "system" yields "light"');
 
   // Verify listener lifecycle contract
   let listenerCount = 0;

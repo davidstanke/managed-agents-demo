@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CatProfile, CatNameEntry } from './types';
 import { generateCatNameSuggestions, getRandomProfile } from './utils/nameGenerator';
 import { Header } from './components/Header';
@@ -6,6 +6,8 @@ import { TraitSelector } from './components/TraitSelector';
 import { SuggestionsView } from './components/SuggestionsView';
 import { FavoritesDrawer } from './components/FavoritesDrawer';
 import { CatPreviewAvatar } from './components/CatPreviewAvatar';
+import { AriaLiveAnnouncer, getThemeAnnouncementMessage } from './components/AriaLiveAnnouncer';
+import { useTheme } from './hooks/useTheme';
 import { Heart, PawPrint } from 'lucide-react';
 
 const INITIAL_PROFILE: CatProfile = {
@@ -16,6 +18,10 @@ const INITIAL_PROFILE: CatProfile = {
 };
 
 export const App: React.FC = () => {
+  const { themePreference, resolvedTheme, cycleTheme } = useTheme();
+  const [announcementMessage, setAnnouncementMessage] = useState<string>('');
+  const isFirstMount = useRef(true);
+
   // Load initial favorites from localStorage if present
   const [favorites, setFavorites] = useState<CatNameEntry[]>(() => {
     try {
@@ -39,6 +45,16 @@ export const App: React.FC = () => {
       console.error('Failed to save favorites to localStorage', e);
     }
   }, [favorites]);
+
+  // Screen reader announcements on theme updates
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+    const msg = getThemeAnnouncementMessage(themePreference, resolvedTheme);
+    setAnnouncementMessage(msg);
+  }, [themePreference, resolvedTheme]);
 
   // Generate suggestions dynamically
   const suggestions = useMemo(() => {
@@ -101,6 +117,9 @@ export const App: React.FC = () => {
         onSurpriseMe={handleSurpriseMe}
         onReset={handleReset}
         hasFilters={hasFilters}
+        themePreference={themePreference}
+        resolvedTheme={resolvedTheme}
+        onCycleTheme={cycleTheme}
       />
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-8">
@@ -166,6 +185,9 @@ export const App: React.FC = () => {
         onRemoveFavorite={handleRemoveFavorite}
         onClearAll={handleClearAllFavorites}
       />
+
+      {/* Screen Reader ARIA Live Announcer */}
+      <AriaLiveAnnouncer message={announcementMessage} />
     </div>
   );
 };
