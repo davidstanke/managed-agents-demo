@@ -126,7 +126,7 @@ export const CatPreviewAvatar: React.FC<CatPreviewAvatarProps> = ({ coat, person
   const isCuddly = personalities.includes('cuddly');
 
   return (
-    <div className="relative flex flex-col items-center justify-center p-4 bg-white/70 backdrop-blur-md rounded-2xl border border-amber-200/80 shadow-sm">
+    <div className="relative flex flex-col items-center justify-center p-4 bg-white/70 dark:bg-slate-900/70 backdrop-blur-md rounded-2xl border border-amber-200/80 dark:border-slate-800 shadow-sm transition-colors">
       <div className="relative w-36 h-36">
         <svg
           viewBox="0 0 100 100"
@@ -271,8 +271,8 @@ export const CatPreviewAvatar: React.FC<CatPreviewAvatarProps> = ({ coat, person
       </div>
 
       <div className="mt-2 text-center">
-        <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-900">
-          <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+        <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-300 border border-transparent dark:border-amber-800/50">
+          <span className="w-2 h-2 rounded-full bg-amber-500 dark:bg-amber-400 animate-ping"></span>
           Live Cat Persona
         </span>
       </div>

@@ -110,7 +110,7 @@ export const App: React.FC = () => {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-amber-50/70 via-orange-50/30 to-amber-100/40 text-slate-800 flex flex-col font-sans">
+    <div className="min-h-screen bg-gradient-to-b from-amber-50/70 via-orange-50/30 to-amber-100/40 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans transition-colors duration-300">
       <Header
         favoritesCount={favorites.length}
         onOpenFavorites={() => setIsFavoritesOpen(true)}
@@ -124,19 +124,19 @@ export const App: React.FC = () => {
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-8">
         {/* Hero Section with Live Avatar Banner */}
-        <section className="bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-rose-500/10 border border-amber-200/90 rounded-3xl p-6 sm:p-8 backdrop-blur-sm shadow-sm flex flex-col md:flex-row items-center gap-6 md:gap-8 justify-between">
+        <section className="bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-rose-500/10 dark:from-amber-950/20 dark:via-orange-950/20 dark:to-rose-950/20 border border-amber-200/90 dark:border-slate-800 rounded-3xl p-6 sm:p-8 backdrop-blur-sm shadow-sm flex flex-col md:flex-row items-center gap-6 md:gap-8 justify-between">
           <div className="space-y-3 max-w-xl text-center md:text-left">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-100 border border-orange-200 text-orange-800 text-xs font-bold shadow-xs">
-              <PawPrint className="w-3.5 h-3.5 text-orange-600" />
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-100 dark:bg-orange-950/60 border border-orange-200 dark:border-orange-800/60 text-orange-800 dark:text-orange-300 text-xs font-bold shadow-xs">
+              <PawPrint className="w-3.5 h-3.5 text-orange-600 dark:text-orange-400" />
               <span>Describe Your Feline Friend</span>
             </div>
-            <h2 className="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight leading-tight">
+            <h2 className="text-2xl sm:text-4xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight leading-tight">
               Find the name your cat was{' '}
-              <span className="bg-gradient-to-r from-orange-600 to-amber-600 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-orange-600 to-amber-600 dark:from-orange-400 dark:to-amber-400 bg-clip-text text-transparent">
                 destined to have.
               </span>
             </h2>
-            <p className="text-slate-600 text-sm leading-relaxed">
+            <p className="text-slate-600 dark:text-slate-300 text-sm leading-relaxed">
               Every cat has an unmistakable vibe. Choose your cat’s coat pattern, personality quirks, and favorite name styles below to instantly generate curated, meaningful suggestions with instant explanations!
             </p>
           </div>
@@ -164,14 +164,14 @@ export const App: React.FC = () => {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-amber-200/80 bg-white/60 backdrop-blur-sm py-6 text-center text-xs text-slate-500">
+      <footer className="border-t border-amber-200/80 dark:border-slate-800 bg-white/60 dark:bg-slate-950/60 backdrop-blur-sm py-6 text-center text-xs text-slate-500 dark:text-slate-400 transition-colors">
         <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <p className="flex items-center gap-1">
             <span>Crafted with</span>
             <Heart className="w-3.5 h-3.5 text-rose-500 fill-current inline" />
             <span>for cat lovers everywhere • Zero external APIs or tracking</span>
           </p>
-          <p className="text-slate-400">
+          <p className="text-slate-400 dark:text-slate-500">
             PurrfectName v1.0 • React + TypeScript + Tailwind
           </p>
         </div>
