@@ -119,18 +119,20 @@ jobs:
             SUMMARY_CONTENT=$(cat /tmp/implementer_summary.md)
           fi
 
-          PR_BODY=$(cat <<EOF
-## 🤖 SDLC Implementer Agent: ${FEATURE_NAME}
-
-Automated implementation and verification completed successfully for branch \`${BRANCH}\` against \`${BASE_BRANCH}\`.
-
-### 📋 Task Breakdown & Verification Status
-${SUMMARY_CONTENT}
-
----
-*Generated automatically by SDLC Implementer Agent (GitHub Actions & Cloud Run)*
-EOF
-          )
+          PR_BODY_FILE=$(mktemp)
+          {
+            echo "## 🤖 SDLC Implementer Agent: ${FEATURE_NAME}"
+            echo ""
+            echo "Automated implementation and verification completed successfully for branch \`${BRANCH}\` against \`${BASE_BRANCH}\`."
+            echo ""
+            echo "### 📋 Task Breakdown & Verification Status"
+            if [ -n "$SUMMARY_CONTENT" ]; then
+              echo "$SUMMARY_CONTENT"
+            fi
+            echo ""
+            echo "---"
+            echo "*Generated automatically by SDLC Implementer Agent (GitHub Actions & Cloud Run)*"
+          } > "$PR_BODY_FILE"
 
           echo "Checking for existing PR for branch: ${BRANCH}..."
           EXISTING_PR_JSON=$(gh pr view "${BRANCH}" --json number,url 2>/dev/null || echo "")
@@ -140,7 +142,7 @@ EOF
             PR_URL=$(echo "$EXISTING_PR_JSON" | jq -r '.url // empty')
             if [ -n "$PR_NUMBER" ]; then
               echo "Updating existing PR #${PR_NUMBER} (${PR_URL})..."
-              gh pr edit "$PR_NUMBER" --title "$PR_TITLE" --body "$PR_BODY" || true
+              gh pr edit "$PR_NUMBER" --title "$PR_TITLE" --body-file "$PR_BODY_FILE" || true
               gh pr comment "$PR_NUMBER" --body "🔄 **Implementer Agent Update**: Re-verified and updated branch \`${BRANCH}\` against \`${BASE_BRANCH}\`." || true
               echo "🎉 Successfully updated Pull Request: ${PR_URL}"
               exit 0
@@ -152,12 +154,12 @@ EOF
             --base "${BASE_BRANCH}" \
             --head "${BRANCH}" \
             --title "${PR_TITLE}" \
-            --body "${PR_BODY}" \
+            --body-file "${PR_BODY_FILE}" \
             --label "automated-pr,implementer" 2>/dev/null || \
           gh pr create \
             --base "${BASE_BRANCH}" \
             --head "${BRANCH}" \
             --title "${PR_TITLE}" \
-            --body "${PR_BODY}")
+            --body-file "${PR_BODY_FILE}")
 
           echo "🎉 Successfully created Pull Request: ${PR_URL}"
