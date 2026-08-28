@@ -5,6 +5,7 @@ on:
     paths:
       - 'docs/specs/**.md'
       - '!docs/specs/_implemented/**'
+      - '!docs/specs/_examples/**'
   workflow_dispatch:
     inputs:
       spec_path:
