@@ -584,8 +584,19 @@ async def task_orchestrator_node(ctx: Any, node_input: Dict[str, Any]) -> AsyncI
     )
 
 
+def _extract_repo_slug(repo_url: Optional[str]) -> Optional[str]:
+    """Extracts 'owner/repo' slug from various Git remote URL formats."""
+    if not repo_url:
+        return None
+    clean = repo_url.strip().removesuffix(".git")
+    m = re.search(r"github\.com[:/]([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)", clean)
+    if m:
+        return m.group(1)
+    return None
+
+
 async def pr_node(ctx: Any, node_input: Dict[str, Any]) -> AsyncIterator[PipelineEvent]:
-    """Final node: reports execution outcome and creates GitHub PR if successful."""
+    """Final node: reports execution outcome, pushes branch to remote, and creates/updates GitHub PR."""
     status = node_input.get("status")
     feature_name = node_input.get("feature_name", "feature")
     branch_name = node_input.get("branch_name", "feature")
@@ -599,9 +610,10 @@ async def pr_node(ctx: Any, node_input: Dict[str, Any]) -> AsyncIterator[Pipelin
     summary_lines = [
         f"### SDLC Execution Summary for `{feature_name}`",
         f"- **Branch**: `{branch_name}`",
+        f"- **Base Branch**: `{base_branch}`",
         f"- **Overall Status**: `{status.upper()}`",
         "",
-        "| Task | Status | Turns |",
+        "| Task | Status | Verification Turns |",
         "|---|---|---|",
     ]
     for r in results:
@@ -615,10 +627,16 @@ async def pr_node(ctx: Any, node_input: Dict[str, Any]) -> AsyncIterator[Pipelin
         summary_text += f"\n\nAll tasks verified successfully for branch `{branch_name}`."
 
         if repo_url and github_token and workspace_dir:
+            repo_slug = _extract_repo_slug(repo_url)
+            repo_flags = ["-R", repo_slug] if repo_slug else []
+            env = os.environ.copy()
+            env["GITHUB_TOKEN"] = github_token
+            env["GH_TOKEN"] = github_token
+
             yield PipelineEvent(f"[Git] 🚀 Pushing `{branch_name}` to remote repository...")
             try:
                 proc_push = await asyncio.create_subprocess_exec(
-                    "git", "push", "origin", branch_name,
+                    "git", "push", "-u", "origin", branch_name,
                     cwd=str(workspace_dir),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -627,48 +645,141 @@ async def pr_node(ctx: Any, node_input: Dict[str, Any]) -> AsyncIterator[Pipelin
                 if proc_push.returncode != 0:
                     yield PipelineEvent(f"[Git] ⚠️ Warning pushing branch: {push_err.decode()}")
                 else:
-                    yield PipelineEvent(f"[Git] 🌿 Branch `{branch_name}` successfully pushed to GitHub.")
+                    yield PipelineEvent(f"[Git] 🌿 Branch `{branch_name}` successfully pushed to remote.")
 
                 if create_pr:
-                    yield PipelineEvent(f"[PR] 📬 Opening Pull Request (`{branch_name}` -> `{base_branch}`)...")
-                    env = os.environ.copy()
-                    env["GITHUB_TOKEN"] = github_token
-                    pr_title = f"feat: implement {feature_name}"
-                    pr_body = summary_text
+                    yield PipelineEvent(f"[PR] 📬 Opening / Updating Pull Request (`{branch_name}` -> `{base_branch}`)...")
+                    pr_title = f"feat({feature_name}): implement {feature_name}"
+                    pr_body = (
+                        f"## 🤖 SDLC Implementer Agent: {feature_name}\n\n"
+                        f"Automated implementation and verification completed successfully for branch `{branch_name}` against `{base_branch}`.\n\n"
+                        f"### 📋 Task Breakdown & Verification Status\n"
+                        f"{summary_text}\n\n"
+                        f"---\n*Generated automatically by SDLC Implementer Agent (Antigravity SDK)*"
+                    )
 
-                    proc_pr = await asyncio.create_subprocess_exec(
-                        "gh", "pr", "create",
-                        "--base", base_branch,
-                        "--head", branch_name,
-                        "--title", pr_title,
-                        "--body", pr_body,
+                    # Check if PR already exists
+                    proc_view = await asyncio.create_subprocess_exec(
+                        "gh", "pr", "view", branch_name, "--json", "number,url",
+                        *repo_flags,
                         cwd=str(workspace_dir),
                         env=env,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                     )
-                    pr_out, pr_err = await proc_pr.communicate()
-                    pr_url = pr_out.decode().strip()
-                    if proc_pr.returncode == 0 and pr_url.startswith("http"):
-                        summary_text += f"\n\n**Pull Request**: [{pr_url}]({pr_url})"
-                        yield PipelineEvent(f"[PR] 🎉 Pull Request created: {pr_url}")
-                    else:
-                        proc_view = await asyncio.create_subprocess_exec(
-                            "gh", "pr", "view", branch_name, "--json", "url", "-q", ".url",
-                            cwd=str(workspace_dir), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                    pv_out, _ = await proc_view.communicate()
+                    existing_pr = None
+                    if proc_view.returncode == 0:
+                        try:
+                            existing_pr = json.loads(pv_out.decode().strip())
+                        except Exception:
+                            pass
+
+                    if existing_pr and existing_pr.get("number"):
+                        pr_number = str(existing_pr["number"])
+                        pr_url = existing_pr.get("url", f"#{pr_number}")
+
+                        # Update existing PR title and body
+                        edit_cmd = [
+                            "gh", "pr", "edit", pr_number,
+                            "--title", pr_title,
+                            "--body", pr_body,
+                            "--add-label", "automated-pr,implementer",
+                            *repo_flags,
+                        ]
+                        proc_edit = await asyncio.create_subprocess_exec(
+                            *edit_cmd,
+                            cwd=str(workspace_dir),
+                            env=env,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
                         )
-                        pv_out, _ = await proc_view.communicate()
-                        existing_pr = pv_out.decode().strip()
-                        if existing_pr.startswith("http"):
-                            summary_text += f"\n\n**Pull Request (Existing)**: [{existing_pr}]({existing_pr})"
-                            yield PipelineEvent(f"[PR] 🔄 Pull Request updated: {existing_pr}")
+                        edit_out, edit_err = await proc_edit.communicate()
+                        if proc_edit.returncode != 0:
+                            # Fallback without label if label doesn't exist
+                            fallback_edit_cmd = [
+                                "gh", "pr", "edit", pr_number,
+                                "--title", pr_title,
+                                "--body", pr_body,
+                                *repo_flags,
+                            ]
+                            await (await asyncio.create_subprocess_exec(
+                                *fallback_edit_cmd, cwd=str(workspace_dir), env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            )).communicate()
+
+                        # Add update comment on existing PR
+                        comment_text = (
+                            f"🔄 **Implementer Agent Update**: Re-verified and updated branch `{branch_name}` against `{base_branch}`.\n\n"
+                            f"{summary_text}"
+                        )
+                        comment_cmd = [
+                            "gh", "pr", "comment", pr_number,
+                            "--body", comment_text,
+                            *repo_flags,
+                        ]
+                        await (await asyncio.create_subprocess_exec(
+                            *comment_cmd, cwd=str(workspace_dir), env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        )).communicate()
+
+                        summary_text += f"\n\n**Pull Request (Updated)**: [{pr_url}]({pr_url})"
+                        yield PipelineEvent(f"[PR] 🔄 Pull Request updated: {pr_url}")
+                    else:
+                        # Create new PR
+                        create_cmd = [
+                            "gh", "pr", "create",
+                            "--base", base_branch,
+                            "--head", branch_name,
+                            "--title", pr_title,
+                            "--body", pr_body,
+                            "--label", "automated-pr,implementer",
+                            *repo_flags,
+                        ]
+                        proc_pr = await asyncio.create_subprocess_exec(
+                            *create_cmd,
+                            cwd=str(workspace_dir),
+                            env=env,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                        )
+                        pr_out, pr_err = await proc_pr.communicate()
+                        pr_url = pr_out.decode().strip()
+
+                        if proc_pr.returncode != 0 or not pr_url.startswith("http"):
+                            # Fallback without label in case labels do not exist in the repository
+                            fallback_create_cmd = [
+                                "gh", "pr", "create",
+                                "--base", base_branch,
+                                "--head", branch_name,
+                                "--title", pr_title,
+                                "--body", pr_body,
+                                *repo_flags,
+                            ]
+                            proc_pr2 = await asyncio.create_subprocess_exec(
+                                *fallback_create_cmd,
+                                cwd=str(workspace_dir),
+                                env=env,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                            )
+                            pr_out2, pr_err2 = await proc_pr2.communicate()
+                            pr_url2 = pr_out2.decode().strip()
+                            if pr_url2.startswith("http"):
+                                pr_url = pr_url2
+
+                        if pr_url.startswith("http"):
+                            summary_text += f"\n\n**Pull Request**: [{pr_url}]({pr_url})"
+                            yield PipelineEvent(f"[PR] 🎉 Pull Request created: {pr_url}")
                         else:
-                            err_msg = pr_err.decode().strip()
+                            err_msg = pr_err.decode().strip() if 'pr_err' in locals() else ""
                             if err_msg:
                                 summary_text += f"\n\n*PR Note*: {err_msg}"
+                                yield PipelineEvent(f"[PR] ⚠️ Pull Request notice: {err_msg}")
             except Exception as e:
                 print(f"[Workflow: pr_node] Git/PR error: {e}")
                 summary_text += f"\n\n*Git Push / PR Error*: {e}"
+                yield PipelineEvent(f"[PR] ⚠️ Git/PR error: {e}")
     else:
         summary_text += "\n\n🛑 Blocker encountered during task execution. Pull Request not created."
 
@@ -735,4 +846,5 @@ __all__ = [
     "_extract_summary",
     "_extract_runner_telemetry",
     "_parse_request_payload",
+    "_extract_repo_slug",
 ]
