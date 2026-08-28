@@ -147,8 +147,60 @@ async def test_pr_node_update_existing_pr():
         assert any("[PR] 🔄 Pull Request updated: https://github.com/davidstanke/managed-agents-demo/pull/42" in ev for ev in events)
 
 
+async def test_pr_node_push_only_when_create_pr_false():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workspace_dir = Path(tmpdir)
+        node_input = {
+            "status": "completed",
+            "feature_name": "user-auth",
+            "branch_name": "feature/user-auth-123",
+            "base_branch": "main",
+            "workspace_dir": str(workspace_dir),
+            "repo_url": "https://github.com/davidstanke/managed-agents-demo.git",
+            "github_token": "ghp_mocktoken",
+            "create_pr": False,
+            "results": [
+                {"task_file": "tasks/001-setup.md", "passed": True, "turns_used": 1},
+            ],
+        }
+
+        commands_run = []
+
+        async def mock_subprocess_exec(*args, **kwargs):
+            cmd = list(args)
+            commands_run.append(cmd)
+
+            class MockProcess:
+                def __init__(self, cmd):
+                    self.cmd = cmd
+                    self.returncode = 0
+
+                async def communicate(self):
+                    return b"", b""
+
+            return MockProcess(cmd)
+
+        with unittest.mock.patch("asyncio.create_subprocess_exec", side_effect=mock_subprocess_exec):
+            events = []
+            async for ev in pr_node(None, node_input):
+                events.append(ev.text)
+
+        # Verify git push was called
+        assert any(
+            cmd[:5] == ["git", "push", "-u", "origin", "feature/user-auth-123"]
+            for cmd in commands_run
+        ), f"git push -u not found in commands: {commands_run}"
+
+        # Verify gh CLI was NOT called
+        assert not any("gh" in cmd for cmd in commands_run), f"gh should not be called when create_pr=False: {commands_run}"
+
+        # Verify events contain push notice
+        assert any("Branch `feature/user-auth-123` successfully pushed to remote" in ev for ev in events)
+
+
 if __name__ == "__main__":
     test_extract_repo_slug()
     asyncio.run(test_pr_node_create_new_pr())
     asyncio.run(test_pr_node_update_existing_pr())
+    asyncio.run(test_pr_node_push_only_when_create_pr_false())
     print("All PR node unit tests passed successfully!")

@@ -96,9 +96,25 @@ def main():
                 f.write(f"### ❌ Implementer Agent Execution Failure\n\n```\n{str(e)}\n```\n")
         sys.exit(1)
 
-    # Write Step Summary for GitHub Actions
+    # Write Step Summary and Output for GitHub Actions
+    summary_text = "\n".join(summary_captured) if summary_captured else "\n".join(full_output_lines[-20:])
+    
+    # Save summary file for downstream workflow steps (e.g. PR creation)
+    try:
+        with open("/tmp/implementer_summary.md", "w", encoding="utf-8") as f:
+            f.write(summary_text + "\n")
+    except Exception as e:
+        print(f"Warning: Could not write /tmp/implementer_summary.md: {e}", file=sys.stderr)
+
+    github_output_file = os.environ.get("GITHUB_OUTPUT", "")
+    if github_output_file:
+        try:
+            with open(github_output_file, "a", encoding="utf-8") as f:
+                f.write(f"workflow_status={workflow_status}\n")
+        except Exception as e:
+            print(f"Warning: Could not write GITHUB_OUTPUT: {e}", file=sys.stderr)
+
     if step_summary_file:
-        summary_text = "\n".join(summary_captured) if summary_captured else "\n".join(full_output_lines[-20:])
         with open(step_summary_file, "a", encoding="utf-8") as f:
             f.write(f"## SDLC Implementer Agent Run Results\n\n{summary_text}\n")
 
