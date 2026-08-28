@@ -1,6 +1,6 @@
 # SDLC Implementer Agent Service
 
-The **Implementer Agent** is an automated multi-agent SDLC workflow built on Google ADK and Antigravity. It decomposes feature specifications into discrete tasks, creates verification tests, implements code increments, runs verification tests, and opens a Pull Request on GitHub.
+The **Implementer Agent** is an automated multi-agent SDLC pipeline built natively on the **Antigravity SDK (`google-antigravity`)**. It decomposes feature specifications into discrete tasks, creates verification tests, implements code increments, runs verification tests, and opens a Pull Request on GitHub.
 
 ---
 

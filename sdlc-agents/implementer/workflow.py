@@ -24,13 +24,37 @@ try:
 except Exception:
     pass
 
-load_dotenv()
-
-from google.adk.agents.context import Context
-from google.adk.events.event import Event
-from google.adk.workflow import Workflow, START
 from google.antigravity.hooks import post_tool_call
-from google.genai import types
+
+
+@dataclass
+class PipelinePart:
+    text: str
+
+
+@dataclass
+class PipelineContent:
+    parts: List[PipelinePart] = field(default_factory=list)
+
+
+class PipelineEvent:
+    """Lightweight event object compatible with both string and part-based consumers."""
+
+    def __init__(self, text: str, output: Optional[Dict[str, Any]] = None, state: Optional[Dict[str, Any]] = None):
+        self.text = text
+        self.output = output
+        self.state = state
+        self.content = PipelineContent(parts=[PipelinePart(text=text)])
+
+    @property
+    def parts(self) -> List[PipelinePart]:
+        return self.content.parts
+
+    def __str__(self) -> str:
+        return self.text
+
+    def __repr__(self) -> str:
+        return f"PipelineEvent(text={self.text!r})"
 
 try:
     from .subagents.decomposer import create_decomposer_agent
@@ -131,7 +155,7 @@ def _extract_runner_telemetry(text: str) -> tuple[bool, str, str]:
     return passed, summary, diagnostics
 
 
-async def branch_init_node(ctx: Context, node_input: Any) -> AsyncIterator[Event]:
+async def branch_init_node(ctx: Any, node_input: Any) -> AsyncIterator[PipelineEvent]:
     """Initializes git workspace and branch for the feature spec."""
     payload = _parse_request_payload(node_input)
     raw_spec_path = payload.get("spec_path", "")
@@ -152,12 +176,7 @@ async def branch_init_node(ctx: Context, node_input: Any) -> AsyncIterator[Event
         if repo_url.startswith("https://"):
             auth_url = f"https://x-access-token:{github_token}@{repo_url[8:]}"
 
-        yield Event(
-            content=types.Content(
-                role="model",
-                parts=[types.Part.from_text(text=f"[Workspace] 📦 Preparing container workspace for `{repo_url}`...")]
-            )
-        )
+        yield PipelineEvent(f"[Workspace] 📦 Preparing container workspace for `{repo_url}`...")
 
         target_branch = branch if branch else "main"
 
@@ -227,12 +246,7 @@ async def branch_init_node(ctx: Context, node_input: Any) -> AsyncIterator[Event
 
     branch_name = branch or f"feature/{feature_name}"
 
-    yield Event(
-        content=types.Content(
-            role="model",
-            parts=[types.Part.from_text(text=f"[Branch] 🌿 Initializing branch `{branch_name}` for spec at `{spec_dir.name}`...")]
-        )
-    )
+    yield PipelineEvent(f"[Branch] 🌿 Initializing branch `{branch_name}` for spec at `{spec_dir.name}`...")
 
     if not repo_url or not github_token:
         # Checkout or create branch locally
@@ -257,12 +271,9 @@ async def branch_init_node(ctx: Context, node_input: Any) -> AsyncIterator[Event
         "github_token": github_token,
         "create_pr": create_pr,
     }
-    yield Event(
+    yield PipelineEvent(
+        f"[Branch] 🌿 Ready on feature branch `{branch_name}`.",
         output=output_data,
-        content=types.Content(
-            role="model",
-            parts=[types.Part.from_text(text=f"[Branch] 🌿 Ready on feature branch `{branch_name}`.")]
-        ),
         state={"spec_info": output_data}
     )
 
@@ -305,18 +316,13 @@ def _extract_task_badge_info(file_path: Path) -> str:
         return f"[Decomposer] 📝 Created task {task_num}: {stem} ({title})"
 
 
-async def decomposer_node(ctx: Context, node_input: Dict[str, Any]) -> AsyncIterator[Event]:
+async def decomposer_node(ctx: Any, node_input: Dict[str, Any]) -> AsyncIterator[PipelineEvent]:
     """Runs the decomposer subagent to break the spec into discrete task files with real-time streaming."""
     spec_file = Path(node_input["spec_file"])
     spec_dir = Path(node_input["spec_dir"])
     feature_name = node_input["feature_name"]
 
-    yield Event(
-        content=types.Content(
-            role="model",
-            parts=[types.Part.from_text(text=f"[Decomposer] 📋 Analyzing spec `{spec_file.name}` to generate task decomposition...")]
-        )
-    )
+    yield PipelineEvent(f"[Decomposer] 📋 Analyzing spec `{spec_file.name}` to generate task decomposition...")
 
     print(f"[Workflow: decomposer] Running decomposer agent on {spec_file}")
     tasks_dir = spec_dir / "tasks"
@@ -379,12 +385,7 @@ async def decomposer_node(ctx: Context, node_input: Dict[str, Any]) -> AsyncIter
         try:
             badge_text = await asyncio.wait_for(event_queue.get(), timeout=0.1)
             print(f"[Workflow: decomposer] {badge_text}")
-            yield Event(
-                content=types.Content(
-                    role="model",
-                    parts=[types.Part.from_text(text=badge_text)]
-                )
-            )
+            yield PipelineEvent(badge_text)
         except asyncio.TimeoutError:
             pass
 
@@ -395,12 +396,7 @@ async def decomposer_node(ctx: Context, node_input: Dict[str, Any]) -> AsyncIter
     while not event_queue.empty():
         badge_text = event_queue.get_nowait()
         print(f"[Workflow: decomposer] {badge_text}")
-        yield Event(
-            content=types.Content(
-                role="model",
-                parts=[types.Part.from_text(text=badge_text)]
-            )
-        )
+        yield PipelineEvent(badge_text)
 
     # Discover generated task files
     task_files = sorted([str(p) for p in tasks_dir.glob("*.md")])
@@ -424,12 +420,7 @@ async def decomposer_node(ctx: Context, node_input: Dict[str, Any]) -> AsyncIter
             seen_tasks.add(p.name)
             badge = _extract_task_badge_info(p)
             print(f"[Workflow: decomposer] {badge}")
-            yield Event(
-                content=types.Content(
-                    role="model",
-                    parts=[types.Part.from_text(text=badge)]
-                )
-            )
+            yield PipelineEvent(badge)
 
     if not task_files:
         raise RuntimeError(f"Decomposer did not create any task files in {tasks_dir}")
@@ -443,49 +434,31 @@ async def decomposer_node(ctx: Context, node_input: Dict[str, Any]) -> AsyncIter
     task_names = [Path(p).stem for p in task_files]
     print(f"[Workflow: decomposer] Created {len(task_files)} task files: {task_files}")
 
-    yield Event(
+    yield PipelineEvent(
+        f"[Decomposer] 📋 Generated {len(task_files)} tasks: {', '.join(task_names)}",
         output=output_data,
-        content=types.Content(
-            role="model",
-            parts=[types.Part.from_text(text=f"[Decomposer] 📋 Generated {len(task_files)} tasks: {', '.join(task_names)}")]
-        ),
         state={"tasks_info": output_data}
     )
 
 
-async def task_orchestrator_node(ctx: Context, node_input: Dict[str, Any]) -> AsyncIterator[Event]:
+async def task_orchestrator_node(ctx: Any, node_input: Dict[str, Any]) -> AsyncIterator[PipelineEvent]:
     """Orchestrates test-writer, engineer, and test-runner subagents through each task."""
     task_files = node_input.get("task_files", [])
     total_tasks = len(task_files)
     results = []
     has_blocker = False
 
-    yield Event(
-        content=types.Content(
-            role="model",
-            parts=[types.Part.from_text(text=f"[Orchestrator] 🚀 Starting task execution pipeline ({total_tasks} tasks total)...")]
-        )
-    )
+    yield PipelineEvent(f"[Orchestrator] 🚀 Starting task execution pipeline ({total_tasks} tasks total)...")
 
     for idx, task_file in enumerate(task_files, 1):
         task_name = Path(task_file).stem
         print(f"\n[Workflow: task_orchestrator] Processing Task {idx}/{total_tasks}: {task_file}")
         task_content = Path(task_file).read_text(encoding="utf-8")
 
-        yield Event(
-            content=types.Content(
-                role="model",
-                parts=[types.Part.from_text(text=f"\n[Task {idx}/{total_tasks}: {task_name}] 🚀 Starting execution")]
-            )
-        )
+        yield PipelineEvent(f"\n[Task {idx}/{total_tasks}: {task_name}] 🚀 Starting execution")
 
         # Step A: Test-Writer Authors Tests
-        yield Event(
-            content=types.Content(
-                role="model",
-                parts=[types.Part.from_text(text=f"[Task {idx}/{total_tasks}: {task_name}] 🧪 Test-Writer authoring verification tests...")]
-            )
-        )
+        yield PipelineEvent(f"[Task {idx}/{total_tasks}: {task_name}] 🧪 Test-Writer authoring verification tests...")
         print(f"[Workflow: task_orchestrator] Invoking test-writer for {task_file}")
         async with create_test_writer_agent() as test_writer:
             tw_prompt = (
@@ -500,12 +473,7 @@ async def task_orchestrator_node(ctx: Context, node_input: Dict[str, Any]) -> As
             tw_output = await tw_resp.text()
 
         tw_summary = _extract_summary(tw_output, "Prepared test suite for acceptance criteria")
-        yield Event(
-            content=types.Content(
-                role="model",
-                parts=[types.Part.from_text(text=f"[Task {idx}/{total_tasks}: {task_name}] 🧪 Test-Writer prepared tests: {tw_summary}")]
-            )
-        )
+        yield PipelineEvent(f"[Task {idx}/{total_tasks}: {task_name}] 🧪 Test-Writer prepared tests: {tw_summary}")
 
         # Step B: Code/Test Loop (Max 3 turns)
         turn = 0
@@ -515,12 +483,7 @@ async def task_orchestrator_node(ctx: Context, node_input: Dict[str, Any]) -> As
         while turn < 3 and not task_passed:
             turn += 1
             print(f"[Workflow: task_orchestrator] Code/Test Loop - Task {idx}, Turn {turn}/3")
-            yield Event(
-                content=types.Content(
-                    role="model",
-                    parts=[types.Part.from_text(text=f"[Task {idx}/{total_tasks}: {task_name}] ⚙️ Engineer implementing solution (Turn {turn}/3)...")]
-                )
-            )
+            yield PipelineEvent(f"[Task {idx}/{total_tasks}: {task_name}] ⚙️ Engineer implementing solution (Turn {turn}/3)...")
 
             # Engineer writes/fixes code
             async with create_engineer_agent() as engineer:
@@ -546,19 +509,8 @@ async def task_orchestrator_node(ctx: Context, node_input: Dict[str, Any]) -> As
                 eng_output = await eng_resp.text()
 
             eng_summary = _extract_summary(eng_output, "Updated implementation files")
-            yield Event(
-                content=types.Content(
-                    role="model",
-                    parts=[types.Part.from_text(text=f"[Task {idx}/{total_tasks}: {task_name}] ⚙️ Engineer completed (Turn {turn}/3): {eng_summary}")]
-                )
-            )
-
-            yield Event(
-                content=types.Content(
-                    role="model",
-                    parts=[types.Part.from_text(text=f"[Task {idx}/{total_tasks}: {task_name}] 🔬 Test-Runner executing verification tests (Turn {turn}/3)...")]
-                )
-            )
+            yield PipelineEvent(f"[Task {idx}/{total_tasks}: {task_name}] ⚙️ Engineer completed (Turn {turn}/3): {eng_summary}")
+            yield PipelineEvent(f"[Task {idx}/{total_tasks}: {task_name}] 🔬 Test-Runner executing verification tests (Turn {turn}/3)...")
 
             # Test-Runner executes verification
             async with create_test_runner_agent() as test_runner:
@@ -576,28 +528,13 @@ async def task_orchestrator_node(ctx: Context, node_input: Dict[str, Any]) -> As
             if passed:
                 task_passed = True
                 print(f"[Workflow: task_orchestrator] Task {idx} PASSED on turn {turn}")
-                yield Event(
-                    content=types.Content(
-                        role="model",
-                        parts=[types.Part.from_text(text=f"[Task {idx}/{total_tasks}: {task_name}] ✅ Verification PASSED on Turn {turn}/3 ({test_summary})")]
-                    )
-                )
+                yield PipelineEvent(f"[Task {idx}/{total_tasks}: {task_name}] ✅ Verification PASSED on Turn {turn}/3 ({test_summary})")
                 break
             else:
                 last_diagnostics = tr_output
-                yield Event(
-                    content=types.Content(
-                        role="model",
-                        parts=[types.Part.from_text(text=f"[Task {idx}/{total_tasks}: {task_name}] ❌ Verification FAILED on Turn {turn}/3: {diag}")]
-                    )
-                )
+                yield PipelineEvent(f"[Task {idx}/{total_tasks}: {task_name}] ❌ Verification FAILED on Turn {turn}/3: {diag}")
                 if turn < 3:
-                    yield Event(
-                        content=types.Content(
-                            role="model",
-                            parts=[types.Part.from_text(text=f"[Task {idx}/{total_tasks}: {task_name}] 🔄 Engineer starting Turn {turn + 1}/3 to resolve failures...")]
-                        )
-                    )
+                    yield PipelineEvent(f"[Task {idx}/{total_tasks}: {task_name}] 🔄 Engineer starting Turn {turn + 1}/3 to resolve failures...")
 
         results.append({
             "task_file": task_file,
@@ -609,12 +546,7 @@ async def task_orchestrator_node(ctx: Context, node_input: Dict[str, Any]) -> As
         if not task_passed:
             has_blocker = True
             print(f"[Workflow: task_orchestrator] Task {idx} failed after 3 turns. Halting task loop.")
-            yield Event(
-                content=types.Content(
-                    role="model",
-                    parts=[types.Part.from_text(text=f"[Task {idx}/{total_tasks}: {task_name}] 🛑 Blocked after 3 turns. Halting remaining tasks.")]
-                )
-            )
+            yield PipelineEvent(f"[Task {idx}/{total_tasks}: {task_name}] 🛑 Blocked after 3 turns. Halting remaining tasks.")
             break
         else:
             # Commit passing task changes to git
@@ -633,21 +565,11 @@ async def task_orchestrator_node(ctx: Context, node_input: Dict[str, Any]) -> As
                         await (await asyncio.create_subprocess_exec("git", "add", "-A", cwd=str(workspace_dir))).communicate()
                         commit_msg = f"feat({feature_name}): complete task {idx} - {task_name}"
                         await (await asyncio.create_subprocess_exec("git", "commit", "-m", commit_msg, cwd=str(workspace_dir))).communicate()
-                        yield Event(
-                            content=types.Content(
-                                role="model",
-                                parts=[types.Part.from_text(text=f"[Git] 💾 Committed changes for task {idx} ({task_name})")]
-                            )
-                        )
+                        yield PipelineEvent(f"[Git] 💾 Committed changes for task {idx} ({task_name})")
                 except Exception as e:
                     print(f"[Workflow: task_orchestrator] Git commit warning: {e}")
 
-            yield Event(
-                content=types.Content(
-                    role="model",
-                    parts=[types.Part.from_text(text=f"[Task {idx}/{total_tasks}: {task_name}] 🎉 Task COMPLETED successfully ({turn} turn{'s' if turn > 1 else ''}).")]
-                )
-            )
+            yield PipelineEvent(f"[Task {idx}/{total_tasks}: {task_name}] 🎉 Task COMPLETED successfully ({turn} turn{'s' if turn > 1 else ''}).")
 
     status = "completed" if not has_blocker else "blocked"
     output_data = {
@@ -655,17 +577,14 @@ async def task_orchestrator_node(ctx: Context, node_input: Dict[str, Any]) -> As
         "results": results,
         "status": status,
     }
-    yield Event(
+    yield PipelineEvent(
+        f"[Orchestrator] 🏁 Task orchestration finished with status: {status.upper()}",
         output=output_data,
-        content=types.Content(
-            role="model",
-            parts=[types.Part.from_text(text=f"[Orchestrator] 🏁 Task orchestration finished with status: {status.upper()}")]
-        ),
         state={"execution_results": output_data}
     )
 
 
-async def pr_node(ctx: Context, node_input: Dict[str, Any]) -> AsyncIterator[Event]:
+async def pr_node(ctx: Any, node_input: Dict[str, Any]) -> AsyncIterator[PipelineEvent]:
     """Final node: reports execution outcome and creates GitHub PR if successful."""
     status = node_input.get("status")
     feature_name = node_input.get("feature_name", "feature")
@@ -696,12 +615,7 @@ async def pr_node(ctx: Context, node_input: Dict[str, Any]) -> AsyncIterator[Eve
         summary_text += f"\n\nAll tasks verified successfully for branch `{branch_name}`."
 
         if repo_url and github_token and workspace_dir:
-            yield Event(
-                content=types.Content(
-                    role="model",
-                    parts=[types.Part.from_text(text=f"[Git] 🚀 Pushing `{branch_name}` to remote repository...")]
-                )
-            )
+            yield PipelineEvent(f"[Git] 🚀 Pushing `{branch_name}` to remote repository...")
             try:
                 proc_push = await asyncio.create_subprocess_exec(
                     "git", "push", "origin", branch_name,
@@ -711,27 +625,12 @@ async def pr_node(ctx: Context, node_input: Dict[str, Any]) -> AsyncIterator[Eve
                 )
                 _, push_err = await proc_push.communicate()
                 if proc_push.returncode != 0:
-                    yield Event(
-                        content=types.Content(
-                            role="model",
-                            parts=[types.Part.from_text(text=f"[Git] ⚠️ Warning pushing branch: {push_err.decode()}")]
-                        )
-                    )
+                    yield PipelineEvent(f"[Git] ⚠️ Warning pushing branch: {push_err.decode()}")
                 else:
-                    yield Event(
-                        content=types.Content(
-                            role="model",
-                            parts=[types.Part.from_text(text=f"[Git] 🌿 Branch `{branch_name}` successfully pushed to GitHub.")]
-                        )
-                    )
+                    yield PipelineEvent(f"[Git] 🌿 Branch `{branch_name}` successfully pushed to GitHub.")
 
                 if create_pr:
-                    yield Event(
-                        content=types.Content(
-                            role="model",
-                            parts=[types.Part.from_text(text=f"[PR] 📬 Opening Pull Request (`{branch_name}` -> `{base_branch}`)...")]
-                        )
-                    )
+                    yield PipelineEvent(f"[PR] 📬 Opening Pull Request (`{branch_name}` -> `{base_branch}`)...")
                     env = os.environ.copy()
                     env["GITHUB_TOKEN"] = github_token
                     pr_title = f"feat: implement {feature_name}"
@@ -752,12 +651,7 @@ async def pr_node(ctx: Context, node_input: Dict[str, Any]) -> AsyncIterator[Eve
                     pr_url = pr_out.decode().strip()
                     if proc_pr.returncode == 0 and pr_url.startswith("http"):
                         summary_text += f"\n\n**Pull Request**: [{pr_url}]({pr_url})"
-                        yield Event(
-                            content=types.Content(
-                                role="model",
-                                parts=[types.Part.from_text(text=f"[PR] 🎉 Pull Request created: {pr_url}")]
-                            )
-                        )
+                        yield PipelineEvent(f"[PR] 🎉 Pull Request created: {pr_url}")
                     else:
                         proc_view = await asyncio.create_subprocess_exec(
                             "gh", "pr", "view", branch_name, "--json", "url", "-q", ".url",
@@ -767,12 +661,7 @@ async def pr_node(ctx: Context, node_input: Dict[str, Any]) -> AsyncIterator[Eve
                         existing_pr = pv_out.decode().strip()
                         if existing_pr.startswith("http"):
                             summary_text += f"\n\n**Pull Request (Existing)**: [{existing_pr}]({existing_pr})"
-                            yield Event(
-                                content=types.Content(
-                                    role="model",
-                                    parts=[types.Part.from_text(text=f"[PR] 🔄 Pull Request updated: {existing_pr}")]
-                                )
-                            )
+                            yield PipelineEvent(f"[PR] 🔄 Pull Request updated: {existing_pr}")
                         else:
                             err_msg = pr_err.decode().strip()
                             if err_msg:
@@ -784,23 +673,66 @@ async def pr_node(ctx: Context, node_input: Dict[str, Any]) -> AsyncIterator[Eve
         summary_text += "\n\n🛑 Blocker encountered during task execution. Pull Request not created."
 
     print(f"\n{summary_text}\n")
-    yield Event(
-        output={"summary": summary_text, "status": status},
-        content=types.Content(
-            role="model",
-            parts=[types.Part.from_text(text=summary_text)]
-        )
+    yield PipelineEvent(
+        summary_text,
+        output={"summary": summary_text, "status": status}
     )
 
 
-# Construct the ADK Workflow
-implementer_workflow = Workflow(
-    name="implementer_workflow",
-    description="Automated SDLC Feature Implementer Workflow",
-    edges=[
-        (START, branch_init_node),
-        (branch_init_node, decomposer_node),
-        (decomposer_node, task_orchestrator_node),
-        (task_orchestrator_node, pr_node),
-    ],
-)
+async def run_implementer_pipeline(payload: Any) -> AsyncIterator[PipelineEvent]:
+    """Runs the complete end-to-end SDLC implementer pipeline with native event streaming."""
+    # 1. Branch Init
+    branch_output = None
+    async for ev in branch_init_node(None, payload):
+        yield ev
+        if ev.output:
+            branch_output = ev.output
+
+    if not branch_output:
+        raise RuntimeError("Branch initialization step failed to produce workspace context.")
+
+    # 2. Decomposer
+    decomposer_output = None
+    async for ev in decomposer_node(None, branch_output):
+        yield ev
+        if ev.output:
+            decomposer_output = ev.output
+
+    if not decomposer_output:
+        raise RuntimeError("Decomposition step failed to produce task definitions.")
+
+    # 3. Task Orchestrator (Test-Writer -> Engineer -> Test-Runner loop)
+    orchestrator_output = None
+    async for ev in task_orchestrator_node(None, decomposer_output):
+        yield ev
+        if ev.output:
+            orchestrator_output = ev.output
+
+    if not orchestrator_output:
+        raise RuntimeError("Task orchestration step failed to produce execution results.")
+
+    # 4. Pull Request
+    async for ev in pr_node(None, orchestrator_output):
+        yield ev
+
+
+# Aliases for backwards compatibility
+implementer_workflow = run_implementer_pipeline
+implementer_pipeline = run_implementer_pipeline
+
+__all__ = [
+    "PipelineEvent",
+    "PipelinePart",
+    "PipelineContent",
+    "branch_init_node",
+    "decomposer_node",
+    "task_orchestrator_node",
+    "pr_node",
+    "run_implementer_pipeline",
+    "implementer_workflow",
+    "implementer_pipeline",
+    "_extract_task_badge_info",
+    "_extract_summary",
+    "_extract_runner_telemetry",
+    "_parse_request_payload",
+]

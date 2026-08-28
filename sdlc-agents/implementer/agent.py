@@ -1,13 +1,11 @@
-"""Unified Implementer ADK Agent definition."""
-
-from google.adk.apps.app import App
+"""SDLC Implementer Agent definition using Antigravity SDK."""
 
 try:
-    from .workflow import implementer_workflow
+    from .workflow import run_implementer_pipeline, implementer_workflow, implementer_pipeline
 except (ImportError, ValueError):
-    from workflow import implementer_workflow
+    from workflow import run_implementer_pipeline, implementer_workflow, implementer_pipeline
 
-root_agent = implementer_workflow
-app = App(name="implementer_agent", root_agent=root_agent)
+root_agent = implementer_pipeline
+pipeline = implementer_pipeline
 
-__all__ = ["app", "root_agent", "implementer_workflow"]
+__all__ = ["root_agent", "pipeline", "run_implementer_pipeline", "implementer_workflow", "implementer_pipeline"]

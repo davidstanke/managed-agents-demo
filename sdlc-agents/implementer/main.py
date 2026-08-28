@@ -15,15 +15,12 @@ repo_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(repo_root))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from google.adk.runners import InMemoryRunner
-from google.genai import types
-
-from agent import app
+from workflow import run_implementer_pipeline
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Run the Unified Implementer ADK Agent on a feature specification."
+        description="Run the SDLC Implementer Agent on a feature specification."
     )
     parser.add_argument(
         "spec_path",
@@ -46,34 +43,18 @@ async def run_workflow(spec_path: str):
         print(f"Error: Path does not exist: {resolved_path}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"==================================================")
-    print(f" Starting Implementer Workflow for: {target_path}")
-    print(f"==================================================")
+    print("==================================================")
+    print(f" Starting Implementer Pipeline for: {target_path}")
+    print("==================================================")
 
-    runner = InMemoryRunner(app=app)
-    session = await runner.session_service.create_session(
-        app_name="implementer_agent",
-        user_id="cli_user"
-    )
+    async for event in run_implementer_pipeline({"spec_path": target_path}):
+        text = str(event)
+        if text:
+            print(text, flush=True)
 
-    user_content = types.Content(
-        role="user",
-        parts=[types.Part.from_text(text=target_path)]
-    )
-
-    async for event in runner.run_async(
-        user_id="cli_user",
-        session_id=session.id,
-        new_message=user_content,
-    ):
-        if event.content and event.content.parts:
-            for part in event.content.parts:
-                if part.text:
-                    print(part.text, flush=True)
-
-    print(f"\n==================================================")
-    print(f" Workflow execution completed.")
-    print(f"==================================================")
+    print("\n==================================================")
+    print(" Pipeline execution completed.")
+    print("==================================================")
 
 
 def main():

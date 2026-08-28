@@ -1,4 +1,4 @@
-"""FastAPI server for the Implementer ADK Agent with A2A support."""
+"""FastAPI server for the Implementer Agent service with Antigravity SDK and A2A support."""
 
 import contextlib
 import os
@@ -18,13 +18,10 @@ os.chdir(repo_root)
 
 load_dotenv()
 
-from google.adk.runners import InMemoryRunner
-from google.genai import types
-
 try:
-    from .agent import app as adk_app, root_agent
+    from .workflow import run_implementer_pipeline
 except (ImportError, ValueError):
-    from agent import app as adk_app, root_agent
+    from workflow import run_implementer_pipeline
 
 
 class TaskRequest(BaseModel):
@@ -44,16 +41,14 @@ class A2AMessageRequest(BaseModel):
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    runner = InMemoryRunner(app=adk_app)
-    app.state.runner = runner
     app.state.agent_name = "implementer_agent"
-    print(f"[Implementer Server] Initialized runner for {adk_app.name}")
+    print("[Implementer Server] Initialized Implementer Agent service (Antigravity SDK)")
     yield
 
 
 app = FastAPI(
     title="SDLC Implementer Agent Service",
-    description="Automated feature implementation agent workflow service",
+    description="Automated feature implementation agent service powered by Antigravity SDK",
     lifespan=lifespan,
 )
 
@@ -63,7 +58,7 @@ async def healthz() -> Dict[str, Any]:
     return {
         "status": "ok",
         "agent": "implementer_agent",
-        "workflow": root_agent.name,
+        "engine": "antigravity-sdk",
     }
 
 
@@ -72,7 +67,7 @@ async def root() -> Dict[str, Any]:
     return {
         "status": "ok",
         "agent": "implementer_agent",
-        "description": "SDLC Implementer Agent Service",
+        "description": "SDLC Implementer Agent Service (Antigravity SDK)",
     }
 
 
@@ -81,8 +76,8 @@ async def agent_card() -> Dict[str, Any]:
     """A2A Agent Card for agent discovery."""
     return {
         "name": "implementer_agent",
-        "description": "Automated SDLC Feature Implementer Agent",
-        "version": "0.1.0",
+        "description": "Automated SDLC Feature Implementer Agent (Antigravity SDK)",
+        "version": "0.2.0",
         "capabilities": ["sdlc", "code-generation", "testing", "decomposition"],
         "endpoints": {
             "a2a": "/a2a/implementer_agent",
@@ -94,30 +89,12 @@ async def agent_card() -> Dict[str, Any]:
 
 async def stream_task_events(req: TaskRequest) -> AsyncIterator[str]:
     """Streams workflow execution events as plain text SSE data lines."""
-    runner: InMemoryRunner = app.state.runner
-    user_id = "a2a_caller"
-    session = await runner.session_service.create_session(
-        app_name=adk_app.name,
-        user_id=user_id,
-    )
-
-    user_content = types.Content(
-        role="user",
-        parts=[types.Part.from_text(text=req.model_dump_json())],
-    )
-
     try:
-        async for event in runner.run_async(
-            user_id=user_id,
-            session_id=session.id,
-            new_message=user_content,
-        ):
-            if event.content and event.content.parts:
-                for part in event.content.parts:
-                    if part.text:
-                        for line in part.text.splitlines():
-                            yield f"data: {line}\n"
-                        yield "\n"
+        async for event in run_implementer_pipeline(req.model_dump()):
+            text = str(event)
+            for line in text.splitlines():
+                yield f"data: {line}\n"
+            yield "\n"
     except Exception as e:
         yield f"data: [Error] Execution failed: {str(e)}\n\n"
 
@@ -129,33 +106,15 @@ async def execute_task(req: TaskRequest, request: Request):
     accept_header = request.headers.get("accept", "")
     if "application/json" in accept_header and "text/event-stream" not in accept_header:
         # Non-streaming JSON response fallback
-        runner: InMemoryRunner = app.state.runner
-        user_id = "a2a_caller"
-        session = await runner.session_service.create_session(
-            app_name=adk_app.name,
-            user_id=user_id,
-        )
-
-        user_content = types.Content(
-            role="user",
-            parts=[types.Part.from_text(text=req.model_dump_json())],
-        )
-
         events_output = []
         final_summary = ""
         status = "completed"
 
         try:
-            async for event in runner.run_async(
-                user_id=user_id,
-                session_id=session.id,
-                new_message=user_content,
-            ):
-                if event.content and event.content.parts:
-                    for part in event.content.parts:
-                        if part.text:
-                            events_output.append(part.text)
-                if isinstance(event.output, dict):
+            async for event in run_implementer_pipeline(req.model_dump()):
+                text = str(event)
+                events_output.append(text)
+                if event.output:
                     if "summary" in event.output:
                         final_summary = event.output["summary"]
                     if "status" in event.output:

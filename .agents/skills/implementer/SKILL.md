@@ -25,7 +25,7 @@ Activate this skill when:
 
 ## Agent Architecture & Subagents
 
-The implementer agent runs as an **ADK Workflow** graph with policy-enforced **Antigravity SDK** subagents:
+The implementer agent runs as an **Antigravity SDK Pipeline** with policy-enforced subagents:
 
 ```mermaid
 flowchart TD
