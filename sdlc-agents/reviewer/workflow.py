@@ -131,7 +131,47 @@ async def fetch_pr_node(ctx: Context, node_input: Any) -> AsyncIterator[Event]:
     pr_title = ""
     pr_body = ""
 
-    if repo_url and github_token:
+    provided_ws = payload.get("workspace_dir")
+    if provided_ws and Path(provided_ws).exists() and (Path(provided_ws) / ".git").exists():
+        workspace_dir = Path(provided_ws).resolve()
+        print(f"[Workflow: fetch_pr] Using existing workspace at {workspace_dir}")
+
+        # Fetch base branch if needed for diff comparison
+        await (await asyncio.create_subprocess_exec(
+            "git", "fetch", "origin", base_branch,
+            cwd=str(workspace_dir),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )).communicate()
+
+        # Fetch latest commit SHA
+        head_sha = payload.get("head_sha") or ""
+        if not head_sha:
+            sha_proc = await asyncio.create_subprocess_exec(
+                "git", "rev-parse", "HEAD",
+                cwd=str(workspace_dir),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            sha_out, _ = await sha_proc.communicate()
+            head_sha = sha_out.decode().strip()
+
+        # Try to get PR metadata from GitHub API if available
+        owner, repo = _extract_owner_repo(repo_url)
+        if owner and repo and pr_number and github_token:
+            api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
+            headers = {
+                "Authorization": f"Bearer {github_token}",
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "SDLC-Reviewer-Agent"
+            }
+            try:
+                req = urllib.request.Request(api_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    pr_data = json.loads(resp.read().decode())
+                    pr_title = pr_data.get("title", "")
+                    pr_body = pr_data.get("body", "")
+            except Exception as e:
+                print(f"[Workflow: fetch_pr] GitHub API fetch error: {e}")
+    elif repo_url and github_token:
         workspace_dir = Path(tempfile.mkdtemp(prefix="reviewer_ws_"))
         auth_url = repo_url
         if repo_url.startswith("https://"):

@@ -28,6 +28,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
           fetch-depth: 0
 
       - name: Authenticate to Google Cloud via WIF
@@ -62,7 +63,9 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             PR_NUM="${{ inputs.pr_number }}"
-            HEAD_SHA=""
+            git fetch origin "pull/${PR_NUM}/head:pr-${PR_NUM}"
+            git checkout "pr-${PR_NUM}"
+            HEAD_SHA=$(git rev-parse HEAD)
             BASE_BRANCH="main"
           else
             PR_NUM="${{ github.event.pull_request.number }}"

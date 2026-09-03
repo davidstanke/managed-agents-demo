@@ -84,8 +84,20 @@ jobs:
             CREATE_PR="true"
           fi
 
-          if [ -z "$BRANCH" ]; then
-            BRANCH="${GITHUB_REF_NAME}"
+          if [ -z "$SPEC_PATH" ]; then
+            SPEC_PATH=$(git diff --name-only origin/main...HEAD 2>/dev/null | grep -E '^docs/specs/.*\.md|^specs/.*/spec\.md' | grep -v '^docs/specs/_' | head -n 1 || echo "")
+          fi
+          if [ -z "$SPEC_PATH" ]; then
+            SPEC_PATH=$(find docs/specs -maxdepth 1 -name "*.md" ! -name "README.md" ! -name "_*" 2>/dev/null | head -n 1 || echo "")
+          fi
+
+          if [ -z "$BRANCH" ] || [ "$BRANCH" = "main" ]; then
+            if [ -n "$SPEC_PATH" ]; then
+              FEATURE_SLUG=$(basename "${SPEC_PATH}" .md)
+              BRANCH="feature/${FEATURE_SLUG}"
+            else
+              BRANCH="${GITHUB_REF_NAME}"
+            fi
           fi
 
           echo "spec_path=${SPEC_PATH}" >> "$GITHUB_OUTPUT"
@@ -125,10 +137,10 @@ jobs:
         run: |
           BRANCH="${{ steps.params.outputs.branch }}"
           echo "Pushing committed changes to origin/${BRANCH}..."
-          git push origin "${BRANCH}"
+          git push -u origin "${BRANCH}"
 
       - name: Open or Update Pull Request
-        if: steps.params.outputs.create_pr == 'true'
+        if: steps.params.outputs.create_pr == 'true' && steps.params.outputs.branch != 'main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH: ${{ steps.params.outputs.branch }}
