@@ -6,71 +6,102 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: 'Pull Request number to review (e.g. 1)'
+        description: 'Pull Request Number to review (e.g. 1)'
         required: true
         type: string
 
-permissions:
-  id-token: write
-  contents: read
-  pull-requests: write
+concurrency:
+  group: review-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  review:
-    name: Run Reviewer Agent
+  review-pr:
+    name: Run Reviewer Agent Council
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 50
+          fetch-depth: 0
 
-      - name: Resolve PR Metadata
-        id: resolve
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            PR_NUM="${{ inputs.pr_number }}"
-            BRANCH="${{ github.ref_name }}"
-            BASE_BRANCH="${{ github.event.repository.default_branch || 'main' }}"
-          else
-            PR_NUM="${{ github.event.pull_request.number }}"
-            BRANCH="${{ github.event.pull_request.head.ref }}"
-            BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
-          fi
-
-          if [ -z "$PR_NUM" ]; then
-            echo "::error::No Pull Request number resolved."
-            exit 1
-          fi
-
-          echo "Target PR Number: #$PR_NUM"
-          echo "Head Branch:      $BRANCH"
-          echo "Base Branch:      $BASE_BRANCH"
-
-          echo "pr_number=$PR_NUM" >> "$GITHUB_OUTPUT"
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-          echo "base_branch=$BASE_BRANCH" >> "$GITHUB_OUTPUT"
-
-      - name: Authenticate to Google Cloud (Workload Identity Federation)
+      - name: Authenticate to Google Cloud via WIF
         id: auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
-          token_format: 'id_token'
-          id_token_audience: ${{ vars.REVIEWER_SERVICE_URL }}
-          id_token_include_email: true
 
-      - name: Invoke Reviewer Agent on Cloud Run
-        env:
-          REVIEWER_SERVICE_URL: ${{ vars.REVIEWER_SERVICE_URL }}
-          GCP_ID_TOKEN: ${{ steps.auth.outputs.id_token }}
-          PR_NUMBER: ${{ steps.resolve.outputs.pr_number }}
-          BRANCH: ${{ steps.resolve.outputs.branch }}
-          BASE_BRANCH: ${{ steps.resolve.outputs.base_branch }}
-          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          version: "latest"
+
+      - name: Install Reviewer Dependencies
         run: |
-          python3 .github/scripts/invoke_reviewer_cloud_run.py
+          uv pip install --system -r sdlc-agents/reviewer/pyproject.toml
+
+      - name: Configure Git Identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine PR Parameters
+        id: params
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            PR_NUM="${{ inputs.pr_number }}"
+            HEAD_SHA=""
+            BASE_BRANCH="main"
+          else
+            PR_NUM="${{ github.event.pull_request.number }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+          fi
+          echo "pr_number=${PR_NUM}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "base_branch=${BASE_BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "Target PR Number: #${PR_NUM}"
+          echo "Base Branch:      ${BASE_BRANCH}"
+          echo "Head SHA:         ${HEAD_SHA}"
+
+      - name: Run Reviewer Agent
+        env:
+          GOOGLE_GENAI_USE_VERTEXAI: "true"
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          GOOGLE_GENAI_LOCATION: "global"
+          GOOGLE_GENAI_MODEL: ${{ vars.GOOGLE_GENAI_MODEL || 'gemini-3.7-flash' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          PR_NUM="${{ steps.params.outputs.pr_number }}"
+          HEAD_SHA="${{ steps.params.outputs.head_sha }}"
+          BASE_BRANCH="${{ steps.params.outputs.base_branch }}"
+
+          echo "============================================================"
+          echo " Running Reviewer Agent Council on GitHub Actions Worker"
+          echo " PR Number:    #${PR_NUM}"
+          echo " Base Branch:  ${BASE_BRANCH}"
+          echo " Head SHA:     ${HEAD_SHA}"
+          echo " Model:        ${GOOGLE_GENAI_MODEL}"
+          echo " GCP Project:  ${GOOGLE_CLOUD_PROJECT}"
+          echo " Location:     ${GOOGLE_GENAI_LOCATION}"
+          echo "============================================================"
+
+          python3 sdlc-agents/reviewer/main.py \
+            --pr "${PR_NUM}" \
+            --base-branch "${BASE_BRANCH}" \
+            --head-sha "${HEAD_SHA}" \
+            --workspace-dir "${GITHUB_WORKSPACE}"
+

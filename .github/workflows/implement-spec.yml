@@ -3,163 +3,177 @@ name: Implement Feature Spec
 on:
   push:
     paths:
-      - 'docs/specs/**.md'
+      - 'docs/specs/*.md'
       - '!docs/specs/_implemented/**'
-      - '!docs/specs/_examples/**'
+      - '!docs/specs/_samples/**'
+      - 'specs/**/spec.md'
   workflow_dispatch:
     inputs:
       spec_path:
-        description: 'Path to spec markdown file (e.g. docs/specs/feature-001.md)'
+        description: 'Path to specification file or directory (e.g., docs/specs/my-feature.md or specs/my-feature)'
         required: true
         type: string
       branch:
-        description: 'Target feature branch name (defaults to current ref branch)'
+        description: 'Target feature branch (defaults to current branch)'
         required: false
         type: string
       create_pr:
-        description: 'Create Pull Request targeting main upon completion'
-        required: true
+        description: 'Whether to automatically open a Pull Request upon completion'
+        required: false
         type: boolean
         default: true
 
-permissions:
-  id-token: write
-  contents: write
-  pull-requests: write
-
 jobs:
-  implement:
+  implement-spec:
     name: Run Implementer Agent
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
-      - name: Resolve Specification Path & Branch
-        id: resolve
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            SPEC="${{ inputs.spec_path }}"
-            BRANCH="${{ inputs.branch }}"
-            CREATE_PR="${{ inputs.create_pr }}"
-            if [ -z "$BRANCH" ]; then
-              BRANCH="${{ github.ref_name }}"
-            fi
-          else
-            # Detect changed spec file in push
-            CHANGED_SPECS=$(git diff --name-only HEAD~1 HEAD -- 'docs/specs/*.md' ':(exclude)docs/specs/_implemented/**' || true)
-            if [ -z "$CHANGED_SPECS" ]; then
-              # Fallback: check all docs/specs
-              CHANGED_SPECS=$(find docs/specs -maxdepth 1 -name "*.md" | head -n 1)
-            fi
-            SPEC=$(echo "$CHANGED_SPECS" | head -n 1)
-            BRANCH="${{ github.ref_name }}"
-            CREATE_PR="true"
-          fi
-
-          if [ -z "$SPEC" ] || [ ! -f "$SPEC" ]; then
-            echo "::warning::No valid spec file found to implement. Skipping execution."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Found target spec: $SPEC on branch: $BRANCH"
-          echo "spec_path=$SPEC" >> "$GITHUB_OUTPUT"
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-          echo "create_pr=$CREATE_PR" >> "$GITHUB_OUTPUT"
-          echo "skip=false" >> "$GITHUB_OUTPUT"
-
-      - name: Authenticate to Google Cloud (Workload Identity Federation)
-        if: steps.resolve.outputs.skip != 'true'
+      - name: Authenticate to Google Cloud via WIF
         id: auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
-          token_format: 'id_token'
-          id_token_audience: ${{ vars.IMPLEMENTER_SERVICE_URL }}
-          id_token_include_email: true
 
-      - name: Invoke Implementer Agent on Cloud Run
-        if: steps.resolve.outputs.skip != 'true'
-        id: implementer
-        env:
-          IMPLEMENTER_SERVICE_URL: ${{ vars.IMPLEMENTER_SERVICE_URL }}
-          GCP_ID_TOKEN: ${{ steps.auth.outputs.id_token }}
-          SPEC_PATH: ${{ steps.resolve.outputs.spec_path }}
-          BRANCH: ${{ steps.resolve.outputs.branch }}
-          BASE_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
-          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CREATE_PR: "false"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          version: "latest"
+
+      - name: Install Implementer Dependencies
         run: |
-          python3 .github/scripts/invoke_cloud_run.py
+          uv pip install --system -r sdlc-agents/implementer/pyproject.toml
 
-      - name: Create or Update Pull Request
-        if: steps.resolve.outputs.skip != 'true' && steps.implementer.outputs.workflow_status == 'completed' && steps.resolve.outputs.create_pr == 'true'
+      - name: Configure Git Identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine Spec Path and Branch
+        id: params
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SPEC_PATH="${{ inputs.spec_path }}"
+            BRANCH="${{ inputs.branch }}"
+            CREATE_PR="${{ inputs.create_pr }}"
+          else
+            BEFORE="${{ github.event.before }}"
+            AFTER="${{ github.sha }}"
+            if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE" 2>/dev/null; then
+              SPEC_PATH=$(git diff --name-only "$BEFORE" "$AFTER" | grep -E '^docs/specs/.*\.md|^specs/.*/spec\.md' | grep -v '^docs/specs/_' | head -n 1 || echo "")
+            else
+              SPEC_PATH=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -E '^docs/specs/.*\.md|^specs/.*/spec\.md' | grep -v '^docs/specs/_' | head -n 1 || echo "")
+            fi
+            BRANCH="${GITHUB_REF_NAME}"
+            CREATE_PR="true"
+          fi
+
+          if [ -z "$BRANCH" ]; then
+            BRANCH="${GITHUB_REF_NAME}"
+          fi
+
+          echo "spec_path=${SPEC_PATH}" >> "$GITHUB_OUTPUT"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "create_pr=${CREATE_PR}" >> "$GITHUB_OUTPUT"
+          echo "Target Spec:   ${SPEC_PATH}"
+          echo "Target Branch: ${BRANCH}"
+          echo "Create PR:     ${CREATE_PR}"
+
+      - name: Run Implementer Agent
+        env:
+          GOOGLE_GENAI_USE_VERTEXAI: "true"
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          GOOGLE_GENAI_LOCATION: "global"
+          GOOGLE_GENAI_MODEL: ${{ vars.GOOGLE_GENAI_MODEL || 'gemini-3.7-flash' }}
+        run: |
+          SPEC_PATH="${{ steps.params.outputs.spec_path }}"
+          BRANCH="${{ steps.params.outputs.branch }}"
+
+          if [ -z "$SPEC_PATH" ]; then
+            echo "Error: No specification path provided or detected."
+            exit 1
+          fi
+
+          echo "============================================================"
+          echo " Running Implementer Agent on GitHub Actions Worker"
+          echo " Spec Path:    ${SPEC_PATH}"
+          echo " Branch:       ${BRANCH}"
+          echo " Model:        ${GOOGLE_GENAI_MODEL}"
+          echo " GCP Project:  ${GOOGLE_CLOUD_PROJECT}"
+          echo " Location:     ${GOOGLE_GENAI_LOCATION}"
+          echo "============================================================"
+
+          python3 sdlc-agents/implementer/main.py "${SPEC_PATH}" --branch "${BRANCH}"
+
+      - name: Push Changes to Feature Branch
+        run: |
+          BRANCH="${{ steps.params.outputs.branch }}"
+          echo "Pushing committed changes to origin/${BRANCH}..."
+          git push origin "${BRANCH}"
+
+      - name: Open or Update Pull Request
+        if: steps.params.outputs.create_pr == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BRANCH: ${{ steps.resolve.outputs.branch }}
-          BASE_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
-          SPEC_PATH: ${{ steps.resolve.outputs.spec_path }}
+          BRANCH: ${{ steps.params.outputs.branch }}
+          SPEC_PATH: ${{ steps.params.outputs.spec_path }}
         run: |
-          FEATURE_NAME=$(basename "$(dirname "$SPEC_PATH")")
-          if [ "$FEATURE_NAME" = "specs" ] || [ "$FEATURE_NAME" = "docs" ] || [ "$FEATURE_NAME" = "." ]; then
-            FEATURE_NAME=$(basename "$SPEC_PATH" .md)
-          fi
-
+          FEATURE_NAME=$(basename "${SPEC_PATH}" .md)
           PR_TITLE="feat(${FEATURE_NAME}): implement ${FEATURE_NAME}"
+          PR_BODY=$(cat << EOF
+          ## 🤖 SDLC Implementer Agent: ${FEATURE_NAME}
 
-          SUMMARY_CONTENT=""
-          if [ -f "/tmp/implementer_summary.md" ]; then
-            SUMMARY_CONTENT=$(cat /tmp/implementer_summary.md)
+          Automated implementation and verification completed successfully on the GitHub Actions worker.
+
+          - **Specification**: \`${SPEC_PATH}\`
+          - **Feature Branch**: \`${BRANCH}\`
+          - **Base Branch**: \`main\`
+          - **Engine**: Antigravity SDK on Gemini 3.8 Global Vertex AI
+
+          ---
+          *Generated automatically by SDLC Implementer Agent (GitHub Actions Worker)*
+          EOF
+          )
+
+          EXISTING_PR=$(gh pr view "${BRANCH}" --json number,url 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING_PR" ]; then
+            PR_NUM=$(echo "$EXISTING_PR" | jq -r '.number')
+            PR_URL=$(echo "$EXISTING_PR" | jq -r '.url')
+            echo "Existing PR found: #${PR_NUM} (${PR_URL}). Updating..."
+
+            gh pr edit "${PR_NUM}" --title "${PR_TITLE}" --body "${PR_BODY}" || true
+            gh pr comment "${PR_NUM}" --body "🔄 **Implementer Agent Update**: Re-verified and pushed updated changes for \`${BRANCH}\`." || true
+            echo "Pull Request #${PR_NUM} updated successfully."
+          else
+            echo "Creating new Pull Request against main..."
+            PR_URL=$(gh pr create \
+              --base "main" \
+              --head "${BRANCH}" \
+              --title "${PR_TITLE}" \
+              --body "${PR_BODY}" \
+              --label "automated-pr,implementer" 2>&1 || \
+              gh pr create \
+              --base "main" \
+              --head "${BRANCH}" \
+              --title "${PR_TITLE}" \
+              --body "${PR_BODY}")
+            echo "Pull Request created: ${PR_URL}"
           fi
 
-          PR_BODY_FILE=$(mktemp)
-          {
-            echo "## 🤖 SDLC Implementer Agent: ${FEATURE_NAME}"
-            echo ""
-            echo "Automated implementation and verification completed successfully for branch \`${BRANCH}\` against \`${BASE_BRANCH}\`."
-            echo ""
-            echo "### 📋 Task Breakdown & Verification Status"
-            if [ -n "$SUMMARY_CONTENT" ]; then
-              echo "$SUMMARY_CONTENT"
-            fi
-            echo ""
-            echo "---"
-            echo "*Generated automatically by SDLC Implementer Agent (GitHub Actions & Cloud Run)*"
-          } > "$PR_BODY_FILE"
-
-          echo "Checking for existing PR for branch: ${BRANCH}..."
-          EXISTING_PR_JSON=$(gh pr view "${BRANCH}" --json number,url 2>/dev/null || echo "")
-
-          if [ -n "$EXISTING_PR_JSON" ]; then
-            PR_NUMBER=$(echo "$EXISTING_PR_JSON" | jq -r '.number // empty')
-            PR_URL=$(echo "$EXISTING_PR_JSON" | jq -r '.url // empty')
-            if [ -n "$PR_NUMBER" ]; then
-              echo "Updating existing PR #${PR_NUMBER} (${PR_URL})..."
-              gh pr edit "$PR_NUMBER" --title "$PR_TITLE" --body-file "$PR_BODY_FILE" || true
-              gh pr comment "$PR_NUMBER" --body "🔄 **Implementer Agent Update**: Re-verified and updated branch \`${BRANCH}\` against \`${BASE_BRANCH}\`." || true
-              echo "🎉 Successfully updated Pull Request: ${PR_URL}"
-              exit 0
-            fi
-          fi
-
-          echo "Creating new PR for branch: ${BRANCH} -> ${BASE_BRANCH}..."
-          PR_URL=$(gh pr create \
-            --base "${BASE_BRANCH}" \
-            --head "${BRANCH}" \
-            --title "${PR_TITLE}" \
-            --body-file "${PR_BODY_FILE}" \
-            --label "automated-pr,implementer" 2>/dev/null || \
-          gh pr create \
-            --base "${BASE_BRANCH}" \
-            --head "${BRANCH}" \
-            --title "${PR_TITLE}" \
-            --body-file "${PR_BODY_FILE}")
-
-          echo "🎉 Successfully created Pull Request: ${PR_URL}"
